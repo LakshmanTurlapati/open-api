@@ -143,3 +143,7 @@ For production use, you should deploy the Node.js server to a secure environment
 ## Disclaimer
 
 This extension is provided for educational purposes only. Using it may violate OpenAI's terms of service. Use at your own risk.
+
+## License
+
+MIT 

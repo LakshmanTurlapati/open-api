@@ -10,7 +10,6 @@ document.addEventListener('DOMContentLoaded', function() {
   const openChatGPTButton = document.getElementById('open-chatgpt');
   const copyKeyButton = document.getElementById('copy-key');
   const regenerateKeyButton = document.getElementById('regenerate-key');
-  const manualPollButton = document.getElementById('manual-poll');
   
   // Tab activation elements
   const tabActivationToggle = document.getElementById('tab-activation-toggle');
@@ -298,17 +297,36 @@ document.addEventListener('DOMContentLoaded', function() {
   // Handle tab activation toggle
   tabActivationToggle.addEventListener('change', function() {
     const isEnabled = tabActivationToggle.checked;
-    const intervalMinutes = parseInt(activationIntervalInput.value, 10) || 5;
     
-    chrome.runtime.sendMessage({
-      action: 'toggleTabActivation',
-      enable: isEnabled,
-      intervalMinutes: intervalMinutes
-    }, function(response) {
-      if (response && response.success) {
-        console.log(`Tab activation ${isEnabled ? 'enabled' : 'disabled'}`);
+    if (isEnabled) {
+      // Show warning about potential interference
+      if (confirm('Warning: Tab Activation may interfere with the extension\'s normal operation. Only use this if necessary.\n\nAre you sure you want to enable it?')) {
+        const intervalMinutes = parseInt(activationIntervalInput.value, 10) || 5;
+        
+        chrome.runtime.sendMessage({
+          action: 'toggleTabActivation',
+          enable: true,
+          intervalMinutes: intervalMinutes
+        }, function(response) {
+          if (response && response.success) {
+            console.log(`Tab activation enabled with interval ${intervalMinutes} minutes`);
+          }
+        });
+      } else {
+        // If they cancel, revert the toggle
+        tabActivationToggle.checked = false;
       }
-    });
+    } else {
+      // Disable tab activation
+      chrome.runtime.sendMessage({
+        action: 'toggleTabActivation',
+        enable: false
+      }, function(response) {
+        if (response && response.success) {
+          console.log('Tab activation disabled');
+        }
+      });
+    }
   });
   
   // Handle save activation interval
@@ -324,31 +342,6 @@ document.addEventListener('DOMContentLoaded', function() {
       if (response && response.success) {
         console.log(`Tab activation interval set to ${intervalMinutes} minutes`);
       }
-    });
-  });
-  
-  // Handle manual poll button click
-  manualPollButton.addEventListener('click', function() {
-    serverStatus.textContent = 'Manually polling server...';
-    manualPollButton.disabled = true;
-    manualPollButton.textContent = 'Refreshing...';
-    
-    chrome.runtime.sendMessage({ action: 'pollManually' }, function(response) {
-      if (response && response.success) {
-        if (response.hadRequest) {
-          serverStatus.textContent = 'Successfully processed a request!';
-        } else {
-          serverStatus.textContent = 'Refreshed, no pending requests.';
-        }
-      } else {
-        serverStatus.textContent = 'Failed to refresh: ' + (response?.error || 'Unknown error');
-      }
-      
-      manualPollButton.disabled = false;
-      manualPollButton.textContent = 'Manual Refresh';
-      
-      // Update other status indicators
-      updateServerStatus();
     });
   });
 }); 

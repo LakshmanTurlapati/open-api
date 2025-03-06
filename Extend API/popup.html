@@ -20,15 +20,17 @@
     .title-container {
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 15px;
+      margin-bottom: 5px;
     }
     .logo {
-      width: 24px;
-      height: 24px;
+      width: 48px;
+      height: 48px;
+      object-fit: contain;
     }
     h1 {
-      font-size: 18px;
-      margin: 0 0 10px 0;
+      font-size: 20px;
+      margin: 0;
       color: #000;
     }
     .status {
@@ -200,9 +202,6 @@
       <div class="status" style="margin-top: 10px;">
         <div id="server-indicator" class="status-indicator"></div>
         <span id="server-status" class="server-status">Checking server connection...</span>
-      </div>
-      <div style="margin-top: 10px; display: flex; justify-content: center;">
-        <button id="manual-poll">Manual Refresh</button>
       </div>
     </div>
     

@@ -341,9 +341,21 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     // Return true to indicate we'll respond asynchronously
     return true;
   } else if (request.action === 'ping') {
-    // Simple ping to check if content script is loaded
     debug('Received ping, sending pong');
     sendResponse({ status: 'pong', url: window.location.href });
+    return true;
+  }
+  
+  if (request.action === 'keepAlive') {
+    debug('Received keepAlive message');
+    // This is just to keep the content script active
+    // Do a minimal operation to refresh the page state
+    const currentUrl = window.location.href;
+    sendResponse({ 
+      status: 'alive', 
+      url: currentUrl,
+      timestamp: new Date().toISOString()
+    });
     return true;
   }
 });

@@ -10,6 +10,7 @@ let isRegistered = false;
 let lastError = null;
 let tabActivationInterval = null;
 let isTabActivationEnabled = false;
+let isTabActivationInProgress = false; // Flag to track if tab activation is in progress
 
 // Constants
 const CHAT_GPT_URLS = [
@@ -44,13 +45,7 @@ function logWithTime(message) {
 }
 
 // Load stored API key and server URL on startup
-chrome.storage.local.get([
-  'apiKey', 
-  'chatGPTTabId', 
-  'serverUrl',
-  'isRegistered',
-  'lastError'
-], (result) => {
+chrome.storage.local.get(['apiKey', 'chatGPTTabId', 'serverUrl'], (result) => {
   console.log("Loading stored data:", result);
   
   if (result.apiKey) {
@@ -64,16 +59,6 @@ chrome.storage.local.get([
   if (result.serverUrl) {
     serverUrl = result.serverUrl;
     console.log("Loaded server URL from storage:", serverUrl);
-  }
-  
-  if (result.isRegistered !== undefined) {
-    isRegistered = result.isRegistered;
-    console.log("Loaded registration status from storage:", isRegistered);
-  }
-  
-  if (result.lastError) {
-    lastError = result.lastError;
-    console.log("Loaded last error from storage:", lastError);
   }
   
   if (result.chatGPTTabId) {
@@ -224,7 +209,6 @@ async function registerWithServer() {
     if (data.success) {
       console.log('Successfully registered with server');
       isRegistered = true;
-      saveRegistrationStatus();
       lastError = null;
       
       // Start polling for requests
@@ -232,16 +216,12 @@ async function registerWithServer() {
     } else {
       console.error('Failed to register with server:', data.error);
       lastError = `Server registration failed: ${data.error || 'Unknown error'}`;
-      isRegistered = false;
-      saveRegistrationStatus();
       // Retry after 30 seconds
       setTimeout(registerWithServer, 30000);
     }
   } catch (error) {
     console.error('Error registering with server:', error);
     lastError = `Server connection error: ${error.message || 'Unknown error'}`;
-    isRegistered = false;
-    saveRegistrationStatus();
     // Retry after 30 seconds
     setTimeout(registerWithServer, 30000);
   }
@@ -249,32 +229,28 @@ async function registerWithServer() {
 
 // Function to start polling the server for requests
 function startPolling() {
-  // Don't start automatic polling - only poll when manually requested
-  console.log('Automatic polling disabled. Using manual polling only.');
-}
-
-// Function to manually poll once
-async function pollOnce() {
-  try {
-    const response = await fetch(`${serverUrl}/poll/${apiKey}`);
-    const data = await response.json();
-    
-    // If we have a request to process
-    if (data.requestId) {
-      console.log('Received request:', data);
-      handleServerRequest(data);
-      return true;
-    }
-    return false;
-  } catch (error) {
-    console.error('Error polling server:', error);
-    lastError = `Polling error: ${error.message || 'Unknown error'}`;
-    // If we can't reach the server, try to re-register
-    isRegistered = false;
-    saveRegistrationStatus();
-    registerWithServer();
-    return false;
+  if (pollInterval) {
+    clearInterval(pollInterval);
   }
+  
+  pollInterval = setInterval(async () => {
+    try {
+      const response = await fetch(`${serverUrl}/poll/${apiKey}`);
+      const data = await response.json();
+      
+      // If we have a request to process
+      if (data.requestId) {
+        console.log('Received request:', data);
+        handleServerRequest(data);
+      }
+    } catch (error) {
+      console.error('Error polling server:', error);
+      lastError = `Polling error: ${error.message || 'Unknown error'}`;
+      // If we can't reach the server, try to re-register
+      isRegistered = false;
+      registerWithServer();
+    }
+  }, 2000); // Poll every 2 seconds
 }
 
 // Function to handle requests from the server
@@ -377,6 +353,17 @@ async function sendResponseToServer(requestId, response, error = null) {
 // Handle request from the popup to open ChatGPT
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   console.log("Received message from popup:", request);
+  
+  // Don't process API key requests during tab activation to prevent unwanted key regeneration
+  if ((request.action === 'getApiKey' || request.action === 'regenerateApiKey') && isTabActivationInProgress) {
+    console.log("Ignoring API key request during tab activation");
+    if (request.action === 'getApiKey') {
+      sendResponse({ apiKey: apiKey });
+    } else {
+      sendResponse({ error: "Cannot regenerate API key during tab activation" });
+    }
+    return true;
+  }
   
   if (request.action === 'openChatGPT') {
     openChatGPTTab().then((tabId) => {
@@ -558,13 +545,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     const result = toggleTabActivation(request.enable, request.intervalMinutes || 5);
     sendResponse(result);
     return true;
-  } else if (request.action === "pollManually") {
-    pollOnce().then(hadRequest => {
-      sendResponse({ success: true, hadRequest });
-    }).catch(error => {
-      sendResponse({ success: false, error: error.toString() });
-    });
-    return true;
   }
 });
 
@@ -706,41 +686,45 @@ function startTabActivation(intervalMinutes = 5) {
   const intervalMs = intervalMinutes * 60 * 1000;
   
   tabActivationInterval = setInterval(async () => {
-    if (chatGPTTabId) {
+    if (chatGPTTabId && !isTabActivationInProgress) {
       try {
+        isTabActivationInProgress = true; // Set flag to true before tab activation
+        
         // Check if the tab still exists
         const tab = await chrome.tabs.get(chatGPTTabId);
         if (tab) {
-          // Briefly activate the tab
-          await chrome.tabs.update(chatGPTTabId, { active: true });
+          console.log(`Sending keep-alive message to ChatGPT tab (ID: ${chatGPTTabId})`);
           
-          // After a short delay, send the tab back to the background
-          setTimeout(async () => {
-            try {
-              // Get the current active tab
-              const [currentTab] = await chrome.tabs.query({ active: true, currentWindow: true });
-              if (currentTab && currentTab.id === chatGPTTabId) {
-                // Only move back if the ChatGPT tab is still active
-                // Find another tab to activate
-                const tabs = await chrome.tabs.query({ 
-                  active: false, 
-                  currentWindow: true
-                });
-                
-                // Filter out the ChatGPT tab
-                const otherTabs = tabs.filter(t => t.id !== chatGPTTabId);
-                
-                if (otherTabs.length > 0) {
-                  await chrome.tabs.update(otherTabs[0].id, { active: true });
-                }
+          // Instead of activating the tab, just send a message to it to keep it alive
+          try {
+            chrome.tabs.sendMessage(chatGPTTabId, { action: 'keepAlive' }, (response) => {
+              if (chrome.runtime.lastError) {
+                console.error("Error sending keep-alive:", chrome.runtime.lastError);
+              } else if (response) {
+                console.log("Keep-alive response:", response);
               }
-            } catch (error) {
-              console.error("Error returning from tab activation:", error);
-            }
-          }, 1000); // 1 second delay
+              isTabActivationInProgress = false;
+            });
+            
+            // Set a timeout in case we don't get a response
+            setTimeout(() => {
+              if (isTabActivationInProgress) {
+                console.log("No response to keep-alive message, resetting flag");
+                isTabActivationInProgress = false;
+              }
+            }, 5000);
+          } catch (err) {
+            console.error("Error in keep-alive message:", err);
+            isTabActivationInProgress = false;
+          }
+        } else {
+          console.log("ChatGPT tab no longer exists");
+          isTabActivationInProgress = false;
         }
       } catch (error) {
         console.error("Error during tab activation:", error);
+        isTabActivationInProgress = false;
+        
         // Tab might not exist anymore
         if (error.message.includes("No tab with id")) {
           clearInterval(tabActivationInterval);
@@ -788,15 +772,4 @@ chrome.storage.local.get(["isTabActivationEnabled", "tabActivationInterval"], (r
       startTabActivation(result.tabActivationInterval || 5);
     }
   }
-});
-
-// Function to save registration status
-function saveRegistrationStatus() {
-  chrome.storage.local.set({ isRegistered });
-}
-
-// Update error handling to save the last error
-function setLastError(error) {
-  lastError = error;
-  chrome.storage.local.set({ lastError });
-} 
+}); 
