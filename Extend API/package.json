@@ -1,0 +1,19 @@
+{
+  "name": "chatgpt-api-bridge",
+  "version": "0.1.0",
+  "description": "Bridge server for ChatGPT API Extension",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "body-parser": "^1.20.3",
+    "cors": "^2.8.5",
+    "express": "^4.21.2"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "author": "",
+  "license": "MIT"
+}

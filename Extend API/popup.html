@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OpenAPI</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 15px;
+      width: 380px;
+      color: #333;
+    }
+    .container {
+      display: flex;
+      flex-direction: column;
+      gap: 15px;
+    }
+    .title-container {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .logo {
+      width: 24px;
+      height: 24px;
+    }
+    h1 {
+      font-size: 18px;
+      margin: 0 0 10px 0;
+      color: #000;
+    }
+    .status {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px;
+      background-color: #f0f0f0;
+      border-radius: 16px;
+      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+    }
+    .status-indicator {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background-color: #ccc;
+    }
+    .connected {
+      background-color: #10a37f;
+    }
+    .server-status {
+      font-weight: bold;
+    }
+    .api-key-section {
+      margin-top: 10px;
+    }
+    .api-key-display {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 5px;
+    }
+    .api-key {
+      flex-grow: 1;
+      padding: 8px;
+      background-color: #f0f0f0;
+      border-radius: 16px;
+      font-family: monospace;
+      word-break: break-all;
+      font-size: 12px;
+      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+    }
+    button {
+      background-color: #10a37f;
+      color: white;
+      border: none;
+      padding: 8px 15px;
+      border-radius: 16px;
+      cursor: pointer;
+      font-size: 14px;
+      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+    }
+    button:hover {
+      background-color: #0d8a6a;
+    }
+    .copy-btn {
+      padding: 5px 10px;
+      font-size: 12px;
+    }
+    .server-config {
+      background-color: #f0f0f0;
+      padding: 10px;
+      border-radius: 16px;
+      margin-top: 15px;
+      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+    }
+    .server-url-input {
+      display: flex;
+      gap: 10px;
+      margin-top: 5px;
+    }
+    input[type="text"] {
+      flex-grow: 1;
+      padding: 8px;
+      border: 1px solid #ccc;
+      border-radius: 16px;
+      font-size: 14px;
+      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+    }
+    hr {
+      border: none;
+      border-top: 1px solid #ddd;
+      margin: 15px 0;
+    }
+    .instructions {
+      font-size: 12px;
+      line-height: 1.4;
+    }
+    code {
+      background-color: #f0f0f0;
+      padding: 2px 4px;
+      border-radius: 16px;
+      font-family: monospace;
+      font-size: 11px;
+      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+    }
+    .switch {
+      position: relative;
+      display: inline-block;
+      width: 60px;
+      height: 34px;
+    }
+    .switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+    .slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-color: #ccc;
+      -webkit-transition: .4s;
+      transition: .4s;
+    }
+    .slider:before {
+      position: absolute;
+      content: "";
+      height: 26px;
+      width: 26px;
+      left: 4px;
+      bottom: 4px;
+      background-color: white;
+      -webkit-transition: .4s;
+      transition: .4s;
+    }
+    input:checked + .slider {
+      background-color: #2196F3;
+    }
+    input:focus + .slider {
+      box-shadow: 0 0 1px #2196F3;
+    }
+    input:checked + .slider:before {
+      -webkit-transform: translateX(26px);
+      -ms-transform: translateX(26px);
+      transform: translateX(26px);
+    }
+    .slider.round {
+      border-radius: 34px;
+    }
+    .slider.round:before {
+      border-radius: 50%;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="title-container">
+      <img src="icons/icon128.png" alt="OpenAPI Logo" class="logo">
+      <h1>OpenAPI</h1>
+    </div>
+    
+    <div class="status">
+      <div id="status-indicator" class="status-indicator"></div>
+      <span id="status-text">Checking ChatGPT connection...</span>
+    </div>
+    
+    <button id="open-chatgpt">Open ChatGPT Tab</button>
+    
+    <div class="server-config">
+      <div>Server Configuration:</div>
+      <div class="server-url-input">
+        <input type="text" id="server-url" placeholder="Server URL (e.g., http://localhost:3000)">
+        <button id="save-server">Save</button>
+      </div>
+      <div class="status" style="margin-top: 10px;">
+        <div id="server-indicator" class="status-indicator"></div>
+        <span id="server-status" class="server-status">Checking server connection...</span>
+      </div>
+      <div style="margin-top: 10px; display: flex; justify-content: center;">
+        <button id="manual-poll">Manual Refresh</button>
+      </div>
+    </div>
+    
+    <div class="api-key-section">
+      <div>Your API Key:</div>
+      <div class="api-key-display">
+        <div id="api-key" class="api-key">Loading...</div>
+        <button id="copy-key" class="copy-btn">Copy</button>
+      </div>
+      <button id="regenerate-key" style="margin-top: 10px;">Regenerate API Key</button>
+    </div>
+    
+    <div class="server-config" style="margin-top: 15px;">
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <div>Tab Activation (Not Recommended):</div>
+        <label class="switch">
+          <input type="checkbox" id="tab-activation-toggle">
+          <span class="slider round"></span>
+        </label>
+      </div>
+      <div style="margin-top: 10px; font-size: 12px; color: #666;">
+        Periodically activates the ChatGPT tab to keep it alive. May disrupt your workflow.
+      </div>
+      <div style="margin-top: 10px; display: flex; align-items: center; gap: 10px;">
+        <label for="activation-interval">Interval (minutes):</label>
+        <input type="number" id="activation-interval" min="1" max="60" value="5" style="width: 60px;">
+        <button id="save-activation" class="copy-btn">Save</button>
+      </div>
+    </div>
+    
+    <hr>
+    
+    <div class="instructions">
+      <p>Use it with this JSON body:</p>
+      <code>
+        {<br>
+        &nbsp;&nbsp;"apiKey": "YOUR_API_KEY",<br>
+        &nbsp;&nbsp;"message": "Hello, ChatGPT!",<br>
+        &nbsp;&nbsp;"newConversation": true<br>
+        }
+      </code>
+    </div>
+  </div>
+  
+  <script src="popup.js"></script>
+</body>
+</html> 

@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ChatGPT URL Detection Test</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+      line-height: 1.6;
+    }
+    h1 {
+      color: #10a37f;
+    }
+    .test-section {
+      margin: 20px 0;
+      padding: 20px;
+      border: 1px solid #ddd;
+      border-radius: 5px;
+    }
+    .url-test {
+      margin: 10px 0;
+      padding: 10px;
+      border-radius: 5px;
+    }
+    .pass {
+      background-color: #e6f7f0;
+      border-left: 4px solid #10a37f;
+    }
+    .fail {
+      background-color: #ffebee;
+      border-left: 4px solid #f44336;
+    }
+    pre {
+      background-color: #f5f5f5;
+      padding: 10px;
+      border-radius: 5px;
+      overflow: auto;
+    }
+  </style>
+</head>
+<body>
+  <h1>ChatGPT URL Detection Test</h1>
+  
+  <div class="test-section">
+    <h2>URL Detection Tests</h2>
+    <div id="test-results">Running tests...</div>
+  </div>
+  
+  <div class="test-section">
+    <h2>Manual URL Test</h2>
+    <div>
+      <input type="text" id="url-input" placeholder="Enter URL to test" style="width: 70%; padding: 8px;">
+      <button id="test-url" style="padding: 8px; background-color: #10a37f; color: white; border: none; border-radius: 4px; cursor: pointer;">Test URL</button>
+    </div>
+    <div id="manual-test-result" style="margin-top: 10px;"></div>
+  </div>
+  
+  <script>
+    // Function to check if a URL is a ChatGPT URL
+    function isChatGPTUrl(url) {
+      const CHAT_GPT_URLS = [
+        "https://chat.openai.com",
+        "https://chat.openai.com/",
+        "https://chat.openai.com/c/",
+        "https://chatgpt.com",
+        "https://chatgpt.com/"
+      ];
+      
+      return CHAT_GPT_URLS.some(chatUrl => url.startsWith(chatUrl));
+    }
+    
+    // Test URLs
+    const testUrls = [
+      "https://chat.openai.com/",
+      "https://chat.openai.com/c/123456",
+      "https://chatgpt.com/",
+      "https://chatgpt.com/something",
+      "https://example.com/",
+      "https://openai.com/",
+      "http://chat.openai.com/",
+      "https://chat.openai.com.phishing.com/"
+    ];
+    
+    // Run tests
+    function runTests() {
+      const resultsDiv = document.getElementById('test-results');
+      resultsDiv.innerHTML = '';
+      
+      testUrls.forEach(url => {
+        const result = isChatGPTUrl(url);
+        const div = document.createElement('div');
+        div.className = `url-test ${result ? 'pass' : 'fail'}`;
+        div.innerHTML = `
+          <strong>${url}</strong>: ${result ? '✓ Detected as ChatGPT' : '✗ Not detected as ChatGPT'}
+        `;
+        resultsDiv.appendChild(div);
+      });
+    }
+    
+    // Manual test
+    document.getElementById('test-url').addEventListener('click', function() {
+      const url = document.getElementById('url-input').value.trim();
+      if (!url) {
+        alert('Please enter a URL to test');
+        return;
+      }
+      
+      const result = isChatGPTUrl(url);
+      const resultDiv = document.getElementById('manual-test-result');
+      resultDiv.innerHTML = `
+        <div class="url-test ${result ? 'pass' : 'fail'}">
+          <strong>${url}</strong>: ${result ? '✓ Detected as ChatGPT' : '✗ Not detected as ChatGPT'}
+        </div>
+      `;
+    });
+    
+    // Run tests on page load
+    runTests();
+  </script>
+</body>
+</html> 

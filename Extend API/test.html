@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OpenAPI Test</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+      line-height: 1.6;
+    }
+    h1 {
+      color: #000;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .logo {
+      width: 32px;
+      height: 32px;
+    }
+    .test-section {
+      margin: 20px 0;
+      padding: 20px;
+      border: 1px solid #ddd;
+      border-radius: 16px;
+      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+    }
+    button {
+      background-color: #10a37f;
+      color: white;
+      border: none;
+      padding: 10px 15px;
+      border-radius: 16px;
+      cursor: pointer;
+      margin: 5px;
+      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+    }
+    button:hover {
+      background-color: #0d8a6a;
+    }
+    pre {
+      background-color: #f5f5f5;
+      padding: 10px;
+      border-radius: 16px;
+      overflow: auto;
+      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+    }
+    #result {
+      margin-top: 20px;
+      white-space: pre-wrap;
+    }
+    input[type="text"] {
+      border-radius: 16px;
+      padding: 8px;
+      border: 1px solid #ccc;
+      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1><img src="icons/icon32.png" alt="OpenAPI Logo" class="logo">OpenAPI Test</h1>
+    
+    <div class="test-section">
+      <h2>Test Configuration</h2>
+      <div>
+        <label for="api-key">API Key:</label>
+        <input type="text" id="api-key" placeholder="Enter your API key from the extension popup" style="width: 300px; padding: 5px;">
+      </div>
+      <div style="margin-top: 10px;">
+        <label for="server-url">Server URL:</label>
+        <input type="text" id="server-url" value="http://localhost:3000" style="width: 300px; padding: 5px;">
+      </div>
+      <div style="margin-top: 10px;">
+        <label for="message">Test Message:</label>
+        <input type="text" id="message" value="Hello, what day is it today?" style="width: 300px; padding: 5px;">
+      </div>
+      <div style="margin-top: 10px;">
+        <label>
+          <input type="checkbox" id="new-conversation" checked>
+          Start new conversation
+        </label>
+      </div>
+    </div>
+    
+    <div class="test-section">
+      <h2>Test Actions</h2>
+      <button id="test-api">Test API</button>
+      <button id="check-status">Check Extension Status</button>
+      <button id="check-server">Check Server Status</button>
+    </div>
+    
+    <div class="test-section">
+      <h2>Result</h2>
+      <pre id="result">Results will appear here...</pre>
+    </div>
+  </div>
+  
+  <script>
+    // Get elements
+    const apiKeyInput = document.getElementById('api-key');
+    const serverUrlInput = document.getElementById('server-url');
+    const messageInput = document.getElementById('message');
+    const newConversationCheckbox = document.getElementById('new-conversation');
+    const testApiButton = document.getElementById('test-api');
+    const checkStatusButton = document.getElementById('check-status');
+    const checkServerButton = document.getElementById('check-server');
+    const resultElement = document.getElementById('result');
+    
+    // Function to display results
+    function showResult(title, data) {
+      resultElement.textContent = `${title}\n\n${typeof data === 'object' ? JSON.stringify(data, null, 2) : data}`;
+    }
+    
+    // Test API
+    testApiButton.addEventListener('click', async () => {
+      try {
+        const apiKey = apiKeyInput.value.trim();
+        if (!apiKey) {
+          showResult('Error', 'Please enter your API key');
+          return;
+        }
+        
+        const serverUrl = serverUrlInput.value.trim();
+        const message = messageInput.value.trim();
+        const newConversation = newConversationCheckbox.checked;
+        
+        showResult('Sending request...', {
+          apiKey: apiKey.substring(0, 8) + '...',
+          message,
+          newConversation
+        });
+        
+        const response = await fetch(`${serverUrl}/api/query`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            apiKey,
+            message,
+            newConversation
+          })
+        });
+        
+        const data = await response.json();
+        showResult('Response', data);
+      } catch (error) {
+        showResult('Error', error.message);
+      }
+    });
+    
+    // Check extension status
+    checkStatusButton.addEventListener('click', async () => {
+      try {
+        const apiKey = apiKeyInput.value.trim();
+        if (!apiKey) {
+          showResult('Error', 'Please enter your API key');
+          return;
+        }
+        
+        const serverUrl = serverUrlInput.value.trim();
+        
+        showResult('Checking extension status...', {
+          apiKey: apiKey.substring(0, 8) + '...'
+        });
+        
+        const response = await fetch(`${serverUrl}/api/status/${apiKey}`);
+        const data = await response.json();
+        showResult('Extension Status', data);
+      } catch (error) {
+        showResult('Error', error.message);
+      }
+    });
+    
+    // Check server status
+    checkServerButton.addEventListener('click', async () => {
+      try {
+        const serverUrl = serverUrlInput.value.trim();
+        
+        showResult('Checking server status...', {
+          serverUrl
+        });
+        
+        const response = await fetch(`${serverUrl}/health`);
+        const data = await response.json();
+        showResult('Server Status', data);
+      } catch (error) {
+        showResult('Error', error.message);
+      }
+    });
+  </script>
+</body>
+</html> 
