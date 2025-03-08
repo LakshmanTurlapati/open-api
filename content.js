@@ -168,84 +168,140 @@ async function setInputValue(inputElement, message) {
   }
 }
 
-// Function to get text from the latest assistant message - updated for 2024 ChatGPT DOM structure
+// Function to get text from the latest assistant message - STEAM DECK FIX
 function getLatestResponseText() {
-  debug('Getting latest response text');
+  debug('Getting latest response text - STEAM DECK FIX');
   
-  // Method 1: Find the most recent assistant message based on the latest chatgpt.com DOM structure
-  // Look specifically for the last assistant message container in the current thread
-  const assistantContainers = document.querySelectorAll('div[data-message-author-role="assistant"]');
-  if (assistantContainers && assistantContainers.length > 0) {
-    debug(`Found ${assistantContainers.length} assistant message containers`);
+  try {
+    // DIRECT METHOD: Get all assistant messages and take the very last one
+    const allAssistantMessages = Array.from(document.querySelectorAll('div[data-message-author-role="assistant"]'));
+    debug(`Found ${allAssistantMessages.length} total assistant messages`);
     
-    // Get the last container which should have the most recent response
-    const lastContainer = assistantContainers[assistantContainers.length - 1];
-    
-    // Try to find the markdown content inside the container
-    const markdownContent = lastContainer.querySelector('.markdown');
-    if (markdownContent) {
-      const text = markdownContent.innerText || markdownContent.textContent;
-      debug(`Got latest response from markdown container: ${text.length} chars`);
+    if (allAssistantMessages.length > 0) {
+      // Get the absolute LAST assistant message
+      const lastMessage = allAssistantMessages[allAssistantMessages.length - 1];
+      
+      // Log some information about this message to help with debugging
+      const messageId = lastMessage.getAttribute('data-message-id') || 'unknown';
+      debug(`Last message ID: ${messageId}`);
+      
+      // First try to get text from a markdown container inside
+      const markdown = lastMessage.querySelector('.markdown');
+      if (markdown) {
+        const text = markdown.innerText || markdown.textContent;
+        debug(`Got text from last message's markdown: ${text.length} chars`);
+        debug(`First 30 chars: "${text.substring(0, 30)}..."`);
+        return text;
+      }
+      
+      // If no markdown, get text directly from the container
+      const text = lastMessage.innerText || lastMessage.textContent;
+      debug(`Got text directly from last message: ${text.length} chars`);
+      debug(`First 30 chars: "${text.substring(0, 30)}..."`);
       return text;
     }
     
-    // If no markdown content, get the text directly from the container
-    const text = lastContainer.innerText || lastContainer.textContent;
-    debug(`Got latest response from assistant container: ${text.length} chars`);
-    return text;
-  }
-  
-  // Method 2: Try to find the message by its position in the DOM - last message in the thread
-  const messageElements = document.querySelectorAll('div[data-message-id]');
-  if (messageElements && messageElements.length > 0) {
-    // Get messages from the end, looking for the last assistant message
-    for (let i = messageElements.length - 1; i >= 0; i--) {
-      const element = messageElements[i];
-      if (element.getAttribute('data-message-author-role') === 'assistant') {
-        const text = element.innerText || element.textContent;
-        debug(`Got latest response from message element: ${text.length} chars`);
+    // FALLBACK METHOD 1: Try using querySelector with :last-of-type
+    debug('Trying fallback method 1: querySelector with :last-of-type');
+    const lastOfType = document.querySelector('div[data-message-author-role="assistant"]:last-of-type');
+    if (lastOfType) {
+      const text = lastOfType.innerText || lastOfType.textContent;
+      debug(`Got text using :last-of-type: ${text.length} chars`);
+      debug(`First 30 chars: "${text.substring(0, 30)}..."`);
+      return text;
+    }
+    
+    // FALLBACK METHOD 2: Try using :last-child on parent container
+    debug('Trying fallback method 2: :last-child on parent containers');
+    const conversationContainer = document.querySelector('.conversation-main, .conversation-container, main, [role="main"]');
+    if (conversationContainer) {
+      const lastAssistantInContainer = Array.from(
+        conversationContainer.querySelectorAll('div[data-message-author-role="assistant"]')
+      ).pop();
+      
+      if (lastAssistantInContainer) {
+        const text = lastAssistantInContainer.innerText || lastAssistantInContainer.textContent;
+        debug(`Got text from container's last assistant: ${text.length} chars`);
+        debug(`First 30 chars: "${text.substring(0, 30)}..."`);
         return text;
       }
     }
-  }
-  
-  // Method 3: Try to find the last message content by specific class patterns
-  // These selectors target various versions of the ChatGPT interface
-  const possibleSelectors = [
-    '.result-streaming:last-child',
-    '.agent-turn:last-child',
-    'div.empty\\:hidden:last-child',
-    'div.chat-message:last-child',
-    'div.chat-message-container:last-child .chat-message',
-    'div[class*="message-content"]:last-child'
-  ];
-  
-  for (const selector of possibleSelectors) {
-    try {
-      const element = document.querySelector(selector);
-      if (element) {
-        const text = element.innerText || element.textContent;
-        if (text && text.trim().length > 0) {
-          debug(`Got latest response using selector ${selector}: ${text.length} chars`);
-          return text;
+    
+    // FALLBACK METHOD 3: Try with different known selectors
+    debug('Trying fallback method 3: Various known selectors');
+    const selectors = [
+      '.message:last-child',
+      '.chat-message:last-child',
+      '.markdown:last-child',
+      '.agent-turn:last-child',
+      'div.empty\\:hidden:last-child',
+      '[data-message-author-role="assistant"]:last-child'
+    ];
+    
+    for (const selector of selectors) {
+      try {
+        const element = document.querySelector(selector);
+        if (element) {
+          const text = element.innerText || element.textContent;
+          if (text && text.length > 0) {
+            debug(`Got text using selector ${selector}: ${text.length} chars`);
+            debug(`First 30 chars: "${text.substring(0, 30)}..."`);
+            return text;
+          }
+        }
+      } catch (error) {
+        debug(`Error with selector ${selector}: ${error.message}`);
+      }
+    }
+    
+    // FALLBACK METHOD 4: Use the reversed DOM walker approach
+    debug('Trying fallback method 4: Reversed DOM walker');
+    // Get all elements that might contain text
+    const allTextElements = document.querySelectorAll('p, pre, ol, ul, h1, h2, h3, h4, h5, h6, div.markdown');
+    if (allTextElements && allTextElements.length > 0) {
+      // Start from the end and work backwards to get the last visible elements
+      for (let i = allTextElements.length - 1; i >= 0; i--) {
+        const element = allTextElements[i];
+        if (element.offsetParent !== null) { // Check if element is visible
+          const text = element.innerText || element.textContent;
+          if (text && text.length > 0) {
+            debug(`Got text using DOM walker: ${text.length} chars`);
+            debug(`First 30 chars: "${text.substring(0, 30)}..."`);
+            return text;
+          }
         }
       }
-    } catch (error) {
-      debug(`Error with selector ${selector}: ${error.message}`);
     }
+    
+    // EMERGENCY FALLBACK: Try document.body and search for specific text patterns
+    debug('EMERGENCY FALLBACK: Searching for assistant patterns in document');
+    const bodyText = document.body.innerText;
+    const assistantPatterns = [
+      "ChatGPT:",
+      "As an AI language model,",
+      "I'm an AI assistant",
+      "I'd be happy to help",
+      "Here's what I found"
+    ];
+    
+    for (const pattern of assistantPatterns) {
+      const index = bodyText.lastIndexOf(pattern);
+      if (index !== -1) {
+        // Get everything from this pattern to the end
+        const text = bodyText.substring(index);
+        debug(`Found text using pattern "${pattern}": ${text.length} chars`);
+        debug(`First 30 chars: "${text.substring(0, 30)}..."`);
+        return text;
+      }
+    }
+    
+    debug('Could not find any response text using any method');
+    return '';
+  } catch (error) {
+    console.error('Error in getLatestResponseText:', error);
+    debug(`Error in getLatestResponseText: ${error.message}`);
+    return '';
   }
-  
-  // If all else fails, try to get text from any markdown container
-  const allMarkdownContainers = document.querySelectorAll('.markdown');
-  if (allMarkdownContainers && allMarkdownContainers.length > 0) {
-    const lastMarkdown = allMarkdownContainers[allMarkdownContainers.length - 1];
-    const text = lastMarkdown.innerText || lastMarkdown.textContent;
-    debug(`Got response from last markdown element: ${text.length} chars`);
-    return text;
-  }
-  
-  debug('Could not find any response text using any method');
-  return '';
 }
 
 // Sends a message to ChatGPT
@@ -253,16 +309,23 @@ async function sendMessage(message) {
   try {
     debug(`Preparing to send message: "${message.substring(0, 30)}..."`);
     
-    // Take a snapshot of existing messages before sending
-    const beforeAssistantContainers = document.querySelectorAll('div[data-message-author-role="assistant"]');
-    const beforeCount = beforeAssistantContainers.length;
-    debug(`Number of assistant messages before sending: ${beforeCount}`);
+    // COUNT ASSISTANT MESSAGES BEFORE SENDING
+    const beforeAssistantCount = document.querySelectorAll('div[data-message-author-role="assistant"]').length;
+    debug(`⭐ BEFORE: Found ${beforeAssistantCount} assistant messages before sending`);
     
-    // Store an array of existing message IDs to compare later
-    const beforeMessageIds = Array.from(
-      document.querySelectorAll('div[data-message-id]')
-    ).map(el => el.getAttribute('data-message-id'));
-    debug(`Collected ${beforeMessageIds.length} message IDs before sending`);
+    // Log the first 3 and last 3 assistant messages to debug
+    const beforeMessages = Array.from(document.querySelectorAll('div[data-message-author-role="assistant"]'));
+    if (beforeMessages.length > 0) {
+      const messagesToLog = Math.min(3, beforeMessages.length);
+      for (let i = 0; i < messagesToLog; i++) {
+        const msgText = beforeMessages[i].innerText.substring(0, 30);
+        debug(`👉 First message ${i+1}: "${msgText}..."`);
+      }
+      for (let i = Math.max(0, beforeMessages.length - 3); i < beforeMessages.length; i++) {
+        const msgText = beforeMessages[i].innerText.substring(0, 30);
+        debug(`👉 Last message ${i+1}: "${msgText}..."`);
+      }
+    }
     
     // Find the textarea or input area
     const inputElement = await waitForElement(SELECTORS.chatInput);
@@ -291,66 +354,39 @@ async function sendMessage(message) {
     
     // Wait for response to complete
     debug('Waiting for response to complete...');
-    const response = await waitForResponseComplete();
+    await waitForResponseComplete();
     
-    // Take a snapshot after receiving a response
-    const afterAssistantContainers = document.querySelectorAll('div[data-message-author-role="assistant"]');
-    const afterCount = afterAssistantContainers.length;
-    debug(`Number of assistant messages after response: ${afterCount}`);
+    // Now check the number of assistant messages AFTER sending
+    const afterAssistantCount = document.querySelectorAll('div[data-message-author-role="assistant"]').length;
+    debug(`⭐ AFTER: Found ${afterAssistantCount} assistant messages after sending`);
     
-    // Compare message IDs to find new messages
-    const afterMessageIds = Array.from(
-      document.querySelectorAll('div[data-message-id]')
-    ).map(el => el.getAttribute('data-message-id'));
+    // Also log the content of the new messages for debugging
+    const afterMessages = Array.from(document.querySelectorAll('div[data-message-author-role="assistant"]'));
     
-    const newMessageIds = afterMessageIds.filter(id => !beforeMessageIds.includes(id));
-    debug(`Found ${newMessageIds.length} new message IDs after response`);
-    
-    // If we can directly identify the new message, get its text
-    if (newMessageIds.length > 0) {
-      const newMessageElements = newMessageIds.map(id => 
-        document.querySelector(`div[data-message-id="${id}"][data-message-author-role="assistant"]`)
-      ).filter(el => el !== null);
-      
-      if (newMessageElements.length > 0) {
-        // Get the content from the newest assistant message
-        const newestMessage = newMessageElements[newMessageElements.length - 1];
-        const messageContent = newestMessage.querySelector('.markdown') || newestMessage;
-        const directText = messageContent.innerText || messageContent.textContent;
-        
-        debug(`Got direct text from new message ID: ${directText.length} chars`);
-        return directText;
+    if (afterMessages.length > beforeAssistantCount) {
+      debug(`👏 NEW MESSAGES DETECTED: ${afterMessages.length - beforeAssistantCount} new messages`);
+      // Log the new messages
+      for (let i = beforeAssistantCount; i < afterMessages.length; i++) {
+        const msgText = afterMessages[i].innerText.substring(0, 30);
+        debug(`✅ New message ${i+1}: "${msgText}..."`);
       }
+    } else {
+      debug(`⚠️ NO NEW MESSAGES DETECTED. Messages before: ${beforeAssistantCount}, after: ${afterAssistantCount}`);
     }
     
-    // If we detected a new assistant message
-    if (afterCount > beforeCount) {
-      debug('New assistant message detected by count comparison');
-      // Get the latest assistant container and extract text from it
-      const latestContainer = afterAssistantContainers[afterAssistantContainers.length - 1];
-      const markdownContent = latestContainer.querySelector('.markdown');
-      
-      if (markdownContent) {
-        const directText = markdownContent.innerText || markdownContent.textContent;
-        debug(`Got text directly from latest markdown: ${directText.length} chars`);
-        return directText;
-      }
-      
-      const containerText = latestContainer.innerText || latestContainer.textContent;
-      debug(`Got text directly from latest container: ${containerText.length} chars`);
-      return containerText;
-    }
+    // Get the latest response
+    const latestResponse = getLatestResponseText();
+    debug(`💬 FINAL response: ${latestResponse.length} chars`);
+    debug(`First 30 chars: "${latestResponse.substring(0, 30)}..."`);
     
-    // If no new message was detected, fall back to the general response text
-    debug(`Using general response text as fallback: ${response.length} chars`);
-    return response;
+    return latestResponse;
   } catch (error) {
     console.error('Error sending message:', error);
     throw error;
   }
 }
 
-// Waits for ChatGPT to complete its response
+// Waits for ChatGPT to complete its response - STEAM DECK FIX
 async function waitForResponseComplete(timeout = 120000) {
   return new Promise((resolve, reject) => {
     const startTime = Date.now();
@@ -358,13 +394,9 @@ async function waitForResponseComplete(timeout = 120000) {
     let lastResponseLength = 0;
     let stableCount = 0;
     
-    // Capture the initial state of messages
-    const initialAssistantCount = document.querySelectorAll('div[data-message-author-role="assistant"]').length;
-    const initialMessageIds = Array.from(
-      document.querySelectorAll('div[data-message-id]')
-    ).map(el => el.getAttribute('data-message-id'));
-    
-    debug(`Initial state: ${initialAssistantCount} assistant messages, ${initialMessageIds.length} total messages`);
+    // Simply count the initial messages
+    const initialMessageCount = document.querySelectorAll('div[data-message-author-role="assistant"]').length;
+    debug(`Initial message count: ${initialMessageCount}`);
     
     const checkCompletion = async () => {
       try {
@@ -373,183 +405,89 @@ async function waitForResponseComplete(timeout = 120000) {
         
         if (loadingIndicator) {
           debug('Loading indicator found, still waiting...');
-          // If we're still loading, wait more
           if (Date.now() - startTime >= timeout) {
             reject(new Error('Timeout waiting for ChatGPT response'));
             return;
           }
           
-          // Print a dot every 3 seconds to show progress
           if (Math.floor((Date.now() - startTime) / 3000) > lastDotCount) {
             lastDotCount = Math.floor((Date.now() - startTime) / 3000);
             debug(`.`);
           }
           
-          setTimeout(checkCompletion, 1000);
+          setTimeout(checkCompletion, 500);
           return;
         }
         
-        debug('No loading indicator, checking for response...');
+        debug('No loading indicator, checking response stability...');
         
-        // Check for new messages that weren't present initially
-        const currentMessageIds = Array.from(
-          document.querySelectorAll('div[data-message-id]')
-        ).map(el => el.getAttribute('data-message-id'));
-        
-        const newMessageIds = currentMessageIds.filter(id => !initialMessageIds.includes(id));
-        
-        // If we have new message IDs, find the newest assistant message among them
-        if (newMessageIds.length > 0) {
-          debug(`Found ${newMessageIds.length} new message IDs`);
-          
-          // Look for assistant messages among the new IDs
-          const newAssistantElements = newMessageIds
-            .map(id => document.querySelector(`div[data-message-id="${id}"][data-message-author-role="assistant"]`))
-            .filter(el => el !== null);
-          
-          if (newAssistantElements.length > 0) {
-            debug(`Found ${newAssistantElements.length} new assistant messages`);
-            // Get the newest assistant element
-            const newestAssistant = newAssistantElements[newAssistantElements.length - 1];
-            
-            // Extract the text content
-            const markdownContent = newestAssistant.querySelector('.markdown');
-            const textElement = markdownContent || newestAssistant;
-            const currentText = textElement.innerText || textElement.textContent;
-            const currentLength = currentText.length;
-            
-            debug(`Current text from newest assistant: ${currentLength} chars`);
-            
-            // If text is still growing, keep waiting
-            if (currentLength > lastResponseLength) {
-              debug(`Response still growing: ${lastResponseLength} -> ${currentLength} chars`);
-              lastResponseLength = currentLength;
-              stableCount = 0;
-              setTimeout(checkCompletion, 1000);
-              return;
-            }
-            
-            // Text has stopped growing, check if it's stable
-            if (currentLength > 0) {
-              stableCount++;
-              debug(`Response stable for ${stableCount} checks (${currentLength} chars)`);
-              
-              // Consider the response complete after it's been stable for 3 checks
-              if (stableCount >= 3) {
-                debug('New assistant message is complete and stable');
-                resolve(currentText);
-                return;
-              }
-            }
-            
-            // Still waiting for stability
-            setTimeout(checkCompletion, 1000);
-            return;
-          }
-        }
-        
-        // If no new message IDs found, check if the total number of assistant messages changed
-        const currentAssistantCount = document.querySelectorAll('div[data-message-author-role="assistant"]').length;
-        
-        if (currentAssistantCount > initialAssistantCount) {
-          debug(`Assistant message count increased: ${initialAssistantCount} -> ${currentAssistantCount}`);
-          
-          // Get the most recent assistant message
-          const assistantMessages = document.querySelectorAll('div[data-message-author-role="assistant"]');
-          const latestMessage = assistantMessages[assistantMessages.length - 1];
-          
-          // Extract text from the latest message
-          const markdownContent = latestMessage.querySelector('.markdown');
-          const textElement = markdownContent || latestMessage;
-          const currentText = textElement.innerText || textElement.textContent;
-          const currentLength = currentText.length;
-          
-          // If text is still growing, keep waiting
-          if (currentLength > lastResponseLength) {
-            debug(`Response still growing: ${lastResponseLength} -> ${currentLength} chars`);
-            lastResponseLength = currentLength;
-            stableCount = 0;
-            setTimeout(checkCompletion, 1000);
-            return;
-          }
-          
-          // Text has stopped growing, check if it's stable
-          if (currentLength > 0) {
-            stableCount++;
-            debug(`Response stable for ${stableCount} checks (${currentLength} chars)`);
-            
-            // Consider the response complete after it's been stable for 3 checks
-            if (stableCount >= 3) {
-              debug('Response is complete and stable');
-              resolve(currentText);
-              return;
-            }
-          }
-          
-          // Still waiting for stability
-          setTimeout(checkCompletion, 1000);
-          return;
-        }
-        
-        // Fallback to original method: get current response text
+        // Get the latest text content
         const currentText = getLatestResponseText();
         const currentLength = currentText.length;
         
+        // If nothing found yet but we haven't timed out, keep checking
+        if (currentLength === 0) {
+          if (Date.now() - startTime >= timeout) {
+            debug('Timeout waiting for any response');
+            reject(new Error('Timeout waiting for ChatGPT response - no content found'));
+            return;
+          }
+          debug('No content found yet, continuing to check...');
+          setTimeout(checkCompletion, 500);
+          return;
+        }
+        
         // If text is still growing, keep waiting
-        if (currentLength > lastResponseLength) {
-          debug(`Response still growing: ${lastResponseLength} -> ${currentLength} chars`);
+        if (currentLength !== lastResponseLength) {
+          if (currentLength > lastResponseLength) {
+            debug(`Response still growing: ${lastResponseLength} → ${currentLength} chars`);
+          } else {
+            debug(`Response length changed: ${lastResponseLength} → ${currentLength} chars`);
+          }
           lastResponseLength = currentLength;
           stableCount = 0;
-          setTimeout(checkCompletion, 1000);
+          setTimeout(checkCompletion, 500);
           return;
         }
         
         // Text has stopped growing, check if it's stable
-        if (currentLength > 0) {
-          stableCount++;
-          debug(`Response stable for ${stableCount} checks (${currentLength} chars)`);
+        stableCount++;
+        debug(`Response stable for ${stableCount} checks (${currentLength} chars)`);
+        
+        // Consider the response complete after it's been stable for several checks
+        if (stableCount >= 5) {  // Increased from 3 to 5 for more stability
+          debug('Response is complete and stable');
           
-          // Consider the response complete after it's been stable for 3 checks
-          if (stableCount >= 3) {
-            debug('Response is complete and stable');
-            
-            // Try to click the copy button if available
+          // Try to click the copy button if available
+          try {
             const copyButton = querySelector(SELECTORS.copyButton);
             if (copyButton) {
-              try {
-                debug('Found copy button, clicking it');
-                copyButton.scrollIntoView({ behavior: 'auto' });
-                await new Promise(resolve => setTimeout(resolve, 300));
-                copyButton.click();
-                debug('Clicked copy button');
-                await new Promise(resolve => setTimeout(resolve, 500));
-              } catch (e) {
-                debug('Error clicking copy button:', e);
-              }
+              debug('Found copy button, clicking it');
+              copyButton.scrollIntoView({ behavior: 'auto' });
+              await new Promise(resolve => setTimeout(resolve, 300));
+              copyButton.click();
+              debug('Clicked copy button');
+              await new Promise(resolve => setTimeout(resolve, 500));
+            } else {
+              debug('No copy button found');
             }
-            
-            resolve(currentText);
-            return;
+          } catch (e) {
+            debug('Error handling copy button:', e);
           }
-        }
-        
-        // No response text found, check again shortly
-        if (Date.now() - startTime >= timeout) {
-          debug('Timeout waiting for response');
           
-          // Return whatever text we have even if empty
-          const finalText = getLatestResponseText();
-          if (finalText.trim()) {
-            resolve(finalText);
-          } else {
-            reject(new Error('Timeout waiting for ChatGPT response'));
-          }
+          debug(`Final response length: ${currentText.length} chars`);
+          debug(`Response first 30 chars: "${currentText.substring(0, 30)}..."`);
+          
+          resolve(currentText);
           return;
         }
         
-        setTimeout(checkCompletion, 1000);
+        // Continue checking for stability
+        setTimeout(checkCompletion, 500);
       } catch (error) {
         console.error('Error checking response completion:', error);
+        debug(`Error in checkCompletion: ${error.message}`);
+        
         if (Date.now() - startTime >= timeout) {
           reject(error);
         } else {
@@ -574,61 +512,51 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         debug(`Processing message request: "${request.message.substring(0, 30)}..."`);
         debug(`New conversation flag: ${request.newConversation}`);
         
-        // Take a snapshot of the current conversation state
-        const beforeMessageIds = Array.from(
-          document.querySelectorAll('div[data-message-id]')
-        ).map(el => el.getAttribute('data-message-id'));
-        
-        const beforeAssistantCount = document.querySelectorAll('div[data-message-author-role="assistant"]').length;
-        debug(`Initial state: ${beforeAssistantCount} assistant messages, ${beforeMessageIds.length} total messages`);
+        // Log the current state of the conversation for debugging
+        const beforeAssistantMessages = document.querySelectorAll('div[data-message-author-role="assistant"]');
+        debug(`⭐ Before processing: ${beforeAssistantMessages.length} assistant messages`);
         
         // Start new chat if requested
         if (request.newConversation) {
+          debug('Starting new chat as requested');
           await startNewChat();
           debug('New chat started successfully');
-          // Wait a bit more for UI to settle after starting new chat
-          await new Promise(resolve => setTimeout(resolve, 2000));
+          // Wait longer for UI to settle after starting new chat
+          await new Promise(resolve => setTimeout(resolve, 3000));
         } else {
           debug('Continuing in existing conversation');
-          // For existing conversations, make sure we're ready to capture the latest response
-          debug(`Current conversation has ${beforeAssistantCount} assistant messages`);
-          
-          // Add a small delay to ensure the UI is ready for sending in existing conversation
-          await new Promise(resolve => setTimeout(resolve, 500));
+          // For existing conversations, log the current state
+          if (beforeAssistantMessages.length > 0) {
+            // Get text from the last assistant message for debugging
+            const lastMessage = beforeAssistantMessages[beforeAssistantMessages.length - 1];
+            const lastText = lastMessage.innerText || lastMessage.textContent;
+            debug(`Last message in existing conversation: "${lastText.substring(0, 30)}..."`);
+          }
+          // Wait for UI to be ready
+          await new Promise(resolve => setTimeout(resolve, 1000));
         }
         
         // Send the message and get response
+        debug('Sending message to ChatGPT...');
         const response = await sendMessage(request.message);
+        debug(`Got response: "${response.substring(0, 30)}..."`);
         
-        // Double-check we got the right response by comparing with the latest state
-        const afterMessageIds = Array.from(
-          document.querySelectorAll('div[data-message-id]')
-        ).map(el => el.getAttribute('data-message-id'));
+        // STEAM DECK SPECIFIC: Force one more check of the latest response
+        // Wait a moment for any final DOM updates
+        await new Promise(resolve => setTimeout(resolve, 1000));
         
-        const newMessageIds = afterMessageIds.filter(id => !beforeMessageIds.includes(id));
-        debug(`After sending: Found ${newMessageIds.length} new message IDs`);
+        // Get the absolute latest response directly one more time
+        const finalResponse = getLatestResponseText();
         
-        // Verify if we have the latest response
-        if (newMessageIds.length > 0) {
-          debug('New messages detected, verifying response is the latest');
-          // Verify received response matches what's in the DOM for the newest message
-          const latestResponse = getLatestResponseText();
-          
-          if (latestResponse !== response && latestResponse.length > 0) {
-            debug(`Response mismatch detected!`);
-            debug(`Received: ${response.substring(0, 30)}... (${response.length} chars)`);
-            debug(`Latest DOM: ${latestResponse.substring(0, 30)}... (${latestResponse.length} chars)`);
-            
-            // Use the latest response from the DOM as it's more likely to be correct
-            debug(`Using latest DOM response instead`);
-            sendResponse({ response: latestResponse });
-            return;
-          }
+        // If the final response is different and not empty, use it instead
+        if (finalResponse !== response && finalResponse.length > 0) {
+          debug(`Using updated response from final check: "${finalResponse.substring(0, 30)}..."`);
+          sendResponse({ response: finalResponse });
+        } else {
+          // Send back the original response
+          debug(`Using original response: "${response.substring(0, 30)}..."`);
+          sendResponse({ response });
         }
-        
-        // Send back the response
-        debug(`Sending response back to background script (length: ${response.length})`);
-        sendResponse({ response });
       } catch (error) {
         console.error('Error in content script:', error);
         sendResponse({ error: error.message || 'Unknown error in content script' });
