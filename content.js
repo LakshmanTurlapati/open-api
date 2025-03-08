@@ -166,7 +166,17 @@ async function setInputValue(inputElement, message) {
 function getLatestResponseText() {
   debug('Getting latest response text');
   
-  // Method 1: Try with the selector for completed responses
+  // Method 1: Try to find the most recent assistant message in the current conversation
+  // Look for the last message with data-message-author-role="assistant"
+  const allAssistantMessages = document.querySelectorAll('[data-message-author-role="assistant"]');
+  if (allAssistantMessages && allAssistantMessages.length > 0) {
+    const lastMessage = allAssistantMessages[allAssistantMessages.length - 1];
+    const text = lastMessage.innerText || lastMessage.textContent;
+    debug(`Got response from last assistant message (${allAssistantMessages.length} total): ${text.length} chars`);
+    return text;
+  }
+  
+  // Method 2: Try with the selector for completed responses
   const responseElement = querySelector(SELECTORS.completedResponse);
   if (responseElement) {
     const text = responseElement.innerText || responseElement.textContent;
@@ -174,16 +184,7 @@ function getLatestResponseText() {
     return text;
   }
   
-  // Method 2: Find the last assistant message
-  const assistantMessages = document.querySelectorAll('[data-message-author-role="assistant"]');
-  if (assistantMessages && assistantMessages.length > 0) {
-    const lastMessage = assistantMessages[assistantMessages.length - 1];
-    const text = lastMessage.innerText || lastMessage.textContent;
-    debug(`Got response from last assistant message: ${text.length} chars`);
-    return text;
-  }
-  
-  // Method 3: Look for markdown content
+  // Method 3: Look for markdown content in the last message
   const markdownElements = document.querySelectorAll('.markdown');
   if (markdownElements && markdownElements.length > 0) {
     const lastMarkdown = markdownElements[markdownElements.length - 1];
@@ -223,14 +224,32 @@ async function sendMessage(message) {
       throw new Error('Send button is not clickable');
     }
     
+    // Count the number of assistant messages before sending
+    const beforeCount = document.querySelectorAll('[data-message-author-role="assistant"]').length;
+    debug(`Number of assistant messages before sending: ${beforeCount}`);
+    
     debug('Clicking send button...');
     sendButton.click();
     
     // Wait for response to complete
     debug('Waiting for response to complete...');
     const response = await waitForResponseComplete();
-    debug(`Response received (${response.length} chars)`);
     
+    // Verify we got a new response by checking if the number of assistant messages increased
+    const afterCount = document.querySelectorAll('[data-message-author-role="assistant"]').length;
+    debug(`Number of assistant messages after response: ${afterCount}`);
+    
+    if (afterCount <= beforeCount) {
+      debug('Warning: No new assistant message detected. Trying alternative method to get response.');
+      // Try to get the latest response text again
+      const latestResponse = getLatestResponseText();
+      if (latestResponse) {
+        debug(`Got response using alternative method (${latestResponse.length} chars)`);
+        return latestResponse;
+      }
+    }
+    
+    debug(`Response received (${response.length} chars)`);
     return response;
   } catch (error) {
     console.error('Error sending message:', error);
@@ -245,6 +264,10 @@ async function waitForResponseComplete(timeout = 120000) {
     let lastDotCount = 0;
     let lastResponseLength = 0;
     let stableCount = 0;
+    
+    // Get the initial count of assistant messages
+    const initialAssistantCount = document.querySelectorAll('[data-message-author-role="assistant"]').length;
+    debug(`Initial assistant message count: ${initialAssistantCount}`);
     
     const checkCompletion = async () => {
       try {
@@ -271,45 +294,97 @@ async function waitForResponseComplete(timeout = 120000) {
         
         debug('No loading indicator, checking for response...');
         
-        // Get current response text
-        const currentText = getLatestResponseText();
-        const currentLength = currentText.length;
-        
-        // If text is still growing, keep waiting
-        if (currentLength > lastResponseLength) {
-          debug(`Response still growing: ${lastResponseLength} -> ${currentLength} chars`);
-          lastResponseLength = currentLength;
-          stableCount = 0;
-          setTimeout(checkCompletion, 1000);
-          return;
-        }
-        
-        // Text has stopped growing, check if it's stable
-        if (currentLength > 0) {
-          stableCount++;
-          debug(`Response stable for ${stableCount} checks (${currentLength} chars)`);
+        // Check if a new assistant message has appeared
+        const currentAssistantCount = document.querySelectorAll('[data-message-author-role="assistant"]').length;
+        if (currentAssistantCount > initialAssistantCount) {
+          debug(`New assistant message detected: ${initialAssistantCount} -> ${currentAssistantCount}`);
+          // Focus on the newest message
+          const assistantMessages = document.querySelectorAll('[data-message-author-role="assistant"]');
+          const newestMessage = assistantMessages[assistantMessages.length - 1];
           
-          // Consider the response complete after it's been stable for 3 checks
-          if (stableCount >= 3) {
-            debug('Response is complete and stable');
-            
-            // Try to click the copy button if available
-            const copyButton = querySelector(SELECTORS.copyButton);
-            if (copyButton) {
-              try {
-                debug('Found copy button, clicking it');
-                copyButton.scrollIntoView({ behavior: 'auto' });
-                await new Promise(resolve => setTimeout(resolve, 300));
-                copyButton.click();
-                debug('Clicked copy button');
-                await new Promise(resolve => setTimeout(resolve, 500));
-              } catch (e) {
-                debug('Error clicking copy button:', e);
-              }
-            }
-            
-            resolve(currentText);
+          // Get current response text from the newest message
+          const currentText = newestMessage.innerText || newestMessage.textContent;
+          const currentLength = currentText.length;
+          
+          // If text is still growing, keep waiting
+          if (currentLength > lastResponseLength) {
+            debug(`Response still growing: ${lastResponseLength} -> ${currentLength} chars`);
+            lastResponseLength = currentLength;
+            stableCount = 0;
+            setTimeout(checkCompletion, 1000);
             return;
+          }
+          
+          // Text has stopped growing, check if it's stable
+          if (currentLength > 0) {
+            stableCount++;
+            debug(`Response stable for ${stableCount} checks (${currentLength} chars)`);
+            
+            // Consider the response complete after it's been stable for 3 checks
+            if (stableCount >= 3) {
+              debug('Response is complete and stable');
+              
+              // Try to click the copy button if available
+              const copyButton = querySelector(SELECTORS.copyButton);
+              if (copyButton) {
+                try {
+                  debug('Found copy button, clicking it');
+                  copyButton.scrollIntoView({ behavior: 'auto' });
+                  await new Promise(resolve => setTimeout(resolve, 300));
+                  copyButton.click();
+                  debug('Clicked copy button');
+                  await new Promise(resolve => setTimeout(resolve, 500));
+                } catch (e) {
+                  debug('Error clicking copy button:', e);
+                }
+              }
+              
+              resolve(currentText);
+              return;
+            }
+          }
+        } else {
+          // No new assistant message, use the standard method
+          // Get current response text
+          const currentText = getLatestResponseText();
+          const currentLength = currentText.length;
+          
+          // If text is still growing, keep waiting
+          if (currentLength > lastResponseLength) {
+            debug(`Response still growing: ${lastResponseLength} -> ${currentLength} chars`);
+            lastResponseLength = currentLength;
+            stableCount = 0;
+            setTimeout(checkCompletion, 1000);
+            return;
+          }
+          
+          // Text has stopped growing, check if it's stable
+          if (currentLength > 0) {
+            stableCount++;
+            debug(`Response stable for ${stableCount} checks (${currentLength} chars)`);
+            
+            // Consider the response complete after it's been stable for 3 checks
+            if (stableCount >= 3) {
+              debug('Response is complete and stable');
+              
+              // Try to click the copy button if available
+              const copyButton = querySelector(SELECTORS.copyButton);
+              if (copyButton) {
+                try {
+                  debug('Found copy button, clicking it');
+                  copyButton.scrollIntoView({ behavior: 'auto' });
+                  await new Promise(resolve => setTimeout(resolve, 300));
+                  copyButton.click();
+                  debug('Clicked copy button');
+                  await new Promise(resolve => setTimeout(resolve, 500));
+                } catch (e) {
+                  debug('Error clicking copy button:', e);
+                }
+              }
+              
+              resolve(currentText);
+              return;
+            }
           }
         }
         
@@ -362,6 +437,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           await new Promise(resolve => setTimeout(resolve, 2000));
         } else {
           debug('Continuing in existing conversation');
+          // For existing conversations, make sure we're ready to capture the latest response
+          // Count current assistant messages to track when a new one appears
+          const currentAssistantCount = document.querySelectorAll('[data-message-author-role="assistant"]').length;
+          debug(`Current assistant message count: ${currentAssistantCount}`);
         }
         
         // Send the message and get response
