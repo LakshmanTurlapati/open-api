@@ -16,6 +16,21 @@ document.addEventListener('DOMContentLoaded', function() {
   const activationIntervalInput = document.getElementById('activation-interval');
   const saveActivationButton = document.getElementById('save-activation');
   
+  // Additional Configuration collapsible section
+  const additionalConfigToggle = document.getElementById('additional-config-toggle');
+  const additionalConfigContent = document.getElementById('additional-config-content');
+  
+  // Handle Additional Configuration toggle
+  additionalConfigToggle.addEventListener('click', function() {
+    if (additionalConfigContent.style.display === 'block') {
+      additionalConfigContent.style.display = 'none';
+      additionalConfigToggle.querySelector('span:last-child').textContent = '▼';
+    } else {
+      additionalConfigContent.style.display = 'block';
+      additionalConfigToggle.querySelector('span:last-child').textContent = '▲';
+    }
+  });
+  
   // Create reset button if it doesn't exist
   let resetChatGPTButton = document.getElementById('reset-chatgpt');
   if (!resetChatGPTButton) {
@@ -51,66 +66,6 @@ document.addEventListener('DOMContentLoaded', function() {
     });
   }
   
-  // Create force script injection button if it doesn't exist
-  let forceScriptButton = document.getElementById('force-script');
-  if (!forceScriptButton) {
-    // Find the parent
-    const parent = resetChatGPTButton.parentElement;
-    
-    // Create the force script button
-    forceScriptButton = document.createElement('button');
-    forceScriptButton.id = 'force-script';
-    forceScriptButton.textContent = 'Force Script Injection';
-    forceScriptButton.style.marginTop = '5px';
-    forceScriptButton.style.backgroundColor = '#ff9800';
-    
-    // Insert the button after the reset button
-    parent.insertBefore(forceScriptButton, resetChatGPTButton.nextSibling);
-    
-    // Add click event listener
-    forceScriptButton.addEventListener('click', function() {
-      statusText.textContent = 'Forcing content script injection...';
-      chrome.runtime.sendMessage({ action: 'forceInjectContentScript' }, function(response) {
-        if (response && response.success) {
-          statusText.textContent = `Script injection requested for tab ${response.tabId}. Testing...`;
-          setTimeout(checkChatGPTStatus, 1000);
-        } else {
-          statusText.textContent = `Script injection failed: ${response.error || 'Unknown error'}`;
-        }
-      });
-    });
-  }
-  
-  // Create debug section if it doesn't exist
-  let debugSection = document.querySelector('.debug-section');
-  if (!debugSection) {
-    const container = document.querySelector('.container');
-    debugSection = document.createElement('div');
-    debugSection.className = 'debug-section';
-    debugSection.style.marginTop = '15px';
-    debugSection.style.backgroundColor = '#f9f9f9';
-    debugSection.style.padding = '10px';
-    debugSection.style.borderRadius = '5px';
-    debugSection.style.border = '1px solid #ddd';
-    
-    const debugTitle = document.createElement('h3');
-    debugTitle.textContent = 'Debug Information';
-    debugTitle.style.fontSize = '14px';
-    debugTitle.style.margin = '0 0 10px 0';
-    
-    const debugInfo = document.createElement('div');
-    debugInfo.id = 'debug-info';
-    debugInfo.style.fontSize = '12px';
-    debugInfo.style.fontFamily = 'monospace';
-    debugInfo.style.whiteSpace = 'pre-wrap';
-    debugInfo.style.maxHeight = '150px';
-    debugInfo.style.overflow = 'auto';
-    
-    debugSection.appendChild(debugTitle);
-    debugSection.appendChild(debugInfo);
-    container.appendChild(debugSection);
-  }
-  
   // Get the API key
   chrome.runtime.sendMessage({ action: 'getApiKey' }, function(response) {
     if (response && response.apiKey) {
@@ -120,9 +75,6 @@ document.addEventListener('DOMContentLoaded', function() {
   
   // Get the server URL and status
   updateServerStatus();
-  
-  // Check for errors
-  updateDebugInfo();
   
   // Check ChatGPT connection status
   function checkChatGPTStatus() {
@@ -135,23 +87,9 @@ document.addEventListener('DOMContentLoaded', function() {
           if (response.tabId) {
             statusText.textContent += ` (Tab ID: ${response.tabId})`;
           }
-          
-          if (response.pingResponse && response.pingResponse.url) {
-            const debugInfo = document.getElementById('debug-info');
-            if (debugInfo) {
-              debugInfo.textContent += `\nTab URL: ${response.pingResponse.url}`;
-            }
-          }
         } else {
           statusIndicator.classList.remove('connected');
           statusText.textContent = response.error || 'ChatGPT tab is not open';
-          
-          // Add detailed debug info
-          const debugInfo = document.getElementById('debug-info');
-          if (debugInfo && response.debugInfo) {
-            const details = JSON.stringify(response.debugInfo, null, 2);
-            debugInfo.textContent += `\n\nConnection Details:\n${details}`;
-          }
         }
       }
     });
@@ -177,50 +115,12 @@ document.addEventListener('DOMContentLoaded', function() {
     });
   }
   
-  function updateDebugInfo() {
-    chrome.runtime.sendMessage({ action: 'getLastError' }, function(response) {
-      const debugInfo = document.getElementById('debug-info');
-      if (debugInfo) {
-        let debugText = '';
-        
-        // Get current time
-        const now = new Date();
-        debugText += `Time: ${now.toLocaleTimeString()}\n\n`;
-        
-        if (response && response.lastError) {
-          debugText += `Last Error: ${response.lastError}\n\n`;
-        }
-        
-        // Add browser information
-        debugText += `Browser: ${navigator.userAgent}\n`;
-        
-        // Add extension ID
-        debugText += `Extension ID: ${chrome.runtime.id}\n`;
-        
-        // Check for open ChatGPT tabs
-        chrome.tabs.query({url: "https://chat.openai.com/*"}, function(tabs) {
-          if (tabs && tabs.length > 0) {
-            debugText += `\nFound ${tabs.length} open ChatGPT tabs:\n`;
-            tabs.forEach((tab, index) => {
-              debugText += `- Tab ${index+1}: ID ${tab.id}, URL: ${tab.url}\n`;
-            });
-          } else {
-            debugText += `\nNo open ChatGPT tabs found!\n`;
-          }
-          
-          debugInfo.textContent = debugText;
-        });
-      }
-    });
-  }
-  
   // Initial check
   checkChatGPTStatus();
   
   // Periodic check every 5 seconds
   setInterval(checkChatGPTStatus, 5000);
   setInterval(updateServerStatus, 5000);
-  setInterval(updateDebugInfo, 5000);
   
   // Save server URL
   saveServerButton.addEventListener('click', function() {

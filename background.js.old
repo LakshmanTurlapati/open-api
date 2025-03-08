@@ -11,6 +11,7 @@ let lastError = null;
 let tabActivationInterval = null;
 let isTabActivationEnabled = false;
 let isTabActivationInProgress = false; // Flag to track if tab activation is in progress
+let lastPollTime = Date.now(); // Track the last poll time
 
 // Constants
 const CHAT_GPT_URLS = [
@@ -20,6 +21,83 @@ const CHAT_GPT_URLS = [
   "https://chatgpt.com",
   "https://chatgpt.com/"
 ];
+
+// Set up persistent alarms
+chrome.alarms.create('keepAlive', { periodInMinutes: 0.5 }); // Every 30 seconds
+chrome.alarms.create('serverPoll', { periodInMinutes: 0.1 }); // Every 6 seconds
+chrome.alarms.create('checkConnection', { periodInMinutes: 1 }); // Every minute
+
+// Listen for alarms
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === 'keepAlive') {
+    console.log('KeepAlive alarm triggered');
+    keepBackgroundAlive();
+  } else if (alarm.name === 'serverPoll') {
+    console.log('ServerPoll alarm triggered');
+    performServerPoll();
+  } else if (alarm.name === 'checkConnection') {
+    console.log('CheckConnection alarm triggered');
+    // If it's been more than 2 minutes since our last poll, re-establish connection
+    if (Date.now() - lastPollTime > 120000) {
+      console.log('Connection seems lost. Re-establishing...');
+      isRegistered = false;
+      registerWithServer();
+    }
+    
+    // Also check ChatGPT tab
+    verifyChatGPTTab(chatGPTTabId).catch(error => {
+      console.error("Error verifying ChatGPT tab:", error);
+    });
+  }
+});
+
+// Keep the background page alive by creating and releasing an object URL
+function keepBackgroundAlive() {
+  const blob = new Blob(['keepAlive']);
+  const objURL = URL.createObjectURL(blob);
+  
+  // Send a keepAlive message to the content script if we have a ChatGPT tab
+  if (chatGPTTabId) {
+    chrome.tabs.sendMessage(chatGPTTabId, { action: 'keepAlive' }, (response) => {
+      if (chrome.runtime.lastError) {
+        console.log('Could not send keepAlive to content script:', chrome.runtime.lastError);
+      } else {
+        console.log('Content script responded to keepAlive:', response);
+      }
+    });
+  }
+  
+  // Clean up the object URL after a short delay
+  setTimeout(() => URL.revokeObjectURL(objURL), 1000);
+}
+
+// Perform a single poll to the server
+async function performServerPoll() {
+  try {
+    if (!apiKey) {
+      console.log('No API key available. Skipping poll.');
+      return;
+    }
+    
+    console.log('Polling server:', serverUrl);
+    const response = await fetch(`${serverUrl}/poll/${apiKey}`);
+    const data = await response.json();
+    
+    lastPollTime = Date.now(); // Update the last successful poll time
+    
+    // If we have a request to process
+    if (data.requestId) {
+      console.log('Received request:', data);
+      handleServerRequest(data);
+    }
+  } catch (error) {
+    console.error('Error polling server:', error);
+    lastError = `Polling error: ${error.message || 'Unknown error'}`;
+    // If we can't reach the server, try to re-register
+    isRegistered = false;
+    registerWithServer();
+  }
+}
 
 // Helper function to check if a URL is a ChatGPT URL
 function isChatGPTUrl(url) {
@@ -100,14 +178,15 @@ async function findExistingChatGPTTab() {
           logWithTime(`Error ensuring content script in existing tab: ${e.message}`);
         }
         
-        return tab.id;
+        return true;
       }
     }
+    
     logWithTime('No existing ChatGPT tabs found');
-    return null;
+    return false;
   } catch (error) {
-    console.error('Error finding existing ChatGPT tabs:', error);
-    return null;
+    console.error('Error finding existing ChatGPT tab:', error);
+    return false;
   }
 }
 
@@ -225,32 +304,6 @@ async function registerWithServer() {
     // Retry after 30 seconds
     setTimeout(registerWithServer, 30000);
   }
-}
-
-// Function to start polling the server for requests
-function startPolling() {
-  if (pollInterval) {
-    clearInterval(pollInterval);
-  }
-  
-  pollInterval = setInterval(async () => {
-    try {
-      const response = await fetch(`${serverUrl}/poll/${apiKey}`);
-      const data = await response.json();
-      
-      // If we have a request to process
-      if (data.requestId) {
-        console.log('Received request:', data);
-        handleServerRequest(data);
-      }
-    } catch (error) {
-      console.error('Error polling server:', error);
-      lastError = `Polling error: ${error.message || 'Unknown error'}`;
-      // If we can't reach the server, try to re-register
-      isRegistered = false;
-      registerWithServer();
-    }
-  }, 2000); // Poll every 2 seconds
 }
 
 // Function to handle requests from the server
@@ -565,211 +618,13 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
       });
     }, 1000);
   } else if (chatGPTTabId === tabId && changeInfo.status === 'complete' && tab.url && !isChatGPTUrl(tab.url)) {
-    console.log(`Tab ${tabId} is no longer on ChatGPT`);
-    chatGPTTabId = null;
-    chrome.storage.local.remove('chatGPTTabId');
-  }
-});
+    console.log(`
 
-// Listen for tab closures
-chrome.tabs.onRemoved.addListener((tabId, removeInfo) => {
-  if (chatGPTTabId === tabId) {
-    console.log(`ChatGPT tab ${tabId} was closed`);
-    chatGPTTabId = null;
-    chrome.storage.local.remove('chatGPTTabId');
-  }
-});
-
-// Function to open a ChatGPT tab
-async function openChatGPTTab() {
-  return new Promise((resolve, reject) => {
-    // Check if we already have a ChatGPT tab open
-    if (chatGPTTabId) {
-      chrome.tabs.get(chatGPTTabId, (tab) => {
-        if (!chrome.runtime.lastError && tab && isChatGPTUrl(tab.url)) {
-          chrome.tabs.update(chatGPTTabId, { active: true });
-          console.log(`Activated existing ChatGPT tab: ${chatGPTTabId}`);
-          resolve(chatGPTTabId);
-          return;
-        }
-        
-        // Tab doesn't exist or is not ChatGPT, create a new one
-        console.log("Existing tab invalid, creating new one");
-        createNewChatGPTTab(resolve, reject);
-      });
-    } else {
-      console.log("No existing tab, creating new one");
-      createNewChatGPTTab(resolve, reject);
-    }
-  });
+// Function to start polling the server for requests - now legacy, kept for compatibility
+function startPolling() {
+  // We're using alarms for polling now, but we'll keep this function for compatibility
+  logWithTime('Legacy startPolling called - using alarm-based polling instead');
+  
+  // Do an immediate poll
+  performServerPoll();
 }
-
-// Helper function to create a new ChatGPT tab
-function createNewChatGPTTab(resolve, reject) {
-  chrome.tabs.create({ url: 'https://chat.openai.com/', active: true }, (tab) => {
-    if (chrome.runtime.lastError) {
-      reject(new Error(`Failed to create tab: ${chrome.runtime.lastError.message}`));
-      return;
-    }
-    
-    chatGPTTabId = tab.id;
-    chrome.storage.local.set({ chatGPTTabId });
-    console.log(`Created new ChatGPT tab: ${chatGPTTabId}`);
-    
-    // Wait for the page to load and initialize content script
-    let loadingTimeout = null;
-    
-    const onTabUpdated = function(tabId, changeInfo, updatedTab) {
-      if (tabId === chatGPTTabId && changeInfo.status === 'complete' && 
-          updatedTab.url && isChatGPTUrl(updatedTab.url)) {
-        
-        console.log("ChatGPT tab fully loaded");
-        
-        // Clear the timeout since the tab loaded correctly
-        if (loadingTimeout) {
-          clearTimeout(loadingTimeout);
-        }
-        
-        // Wait a bit for the page to fully initialize and content scripts to load
-        setTimeout(() => {
-          chrome.tabs.onUpdated.removeListener(onTabUpdated);
-          console.log("ChatGPT tab ready for interaction");
-          
-          // Inject content script
-          chrome.scripting.executeScript({
-            target: { tabId: chatGPTTabId },
-            files: ['content.js']
-          }).then(() => {
-            console.log("Content script injected successfully");
-            
-            // Verify content script is active
-            chrome.tabs.sendMessage(chatGPTTabId, { action: 'ping' }, response => {
-              if (chrome.runtime.lastError) {
-                console.warn("Content script not responding yet:", chrome.runtime.lastError);
-                // Still resolve since the tab is open
-                resolve(chatGPTTabId);
-                return;
-              }
-              
-              console.log("Content script responded to ping:", response);
-              resolve(chatGPTTabId);
-            });
-          }).catch(error => {
-            console.error("Error injecting content script:", error);
-            resolve(chatGPTTabId); // Still resolve to allow manual retry
-          });
-        }, 5000);  // Wait 5 seconds to ensure everything is fully loaded
-      }
-    };
-    
-    chrome.tabs.onUpdated.addListener(onTabUpdated);
-    
-    // Set a timeout in case the tab never fully loads
-    loadingTimeout = setTimeout(() => {
-      chrome.tabs.onUpdated.removeListener(onTabUpdated);
-      reject(new Error('Timeout waiting for ChatGPT tab to load'));
-    }, 30000);  // 30-second timeout
-  });
-}
-
-// Function to periodically activate the ChatGPT tab
-function startTabActivation(intervalMinutes = 5) {
-  // Clear any existing interval
-  if (tabActivationInterval) {
-    clearInterval(tabActivationInterval);
-    tabActivationInterval = null;
-  }
-  
-  if (!isTabActivationEnabled) return;
-  
-  // Convert minutes to milliseconds
-  const intervalMs = intervalMinutes * 60 * 1000;
-  
-  tabActivationInterval = setInterval(async () => {
-    if (chatGPTTabId && !isTabActivationInProgress) {
-      try {
-        isTabActivationInProgress = true; // Set flag to true before tab activation
-        
-        // Check if the tab still exists
-        const tab = await chrome.tabs.get(chatGPTTabId);
-        if (tab) {
-          console.log(`Sending keep-alive message to ChatGPT tab (ID: ${chatGPTTabId})`);
-          
-          // Instead of activating the tab, just send a message to it to keep it alive
-          try {
-            chrome.tabs.sendMessage(chatGPTTabId, { action: 'keepAlive' }, (response) => {
-              if (chrome.runtime.lastError) {
-                console.error("Error sending keep-alive:", chrome.runtime.lastError);
-              } else if (response) {
-                console.log("Keep-alive response:", response);
-              }
-              isTabActivationInProgress = false;
-            });
-            
-            // Set a timeout in case we don't get a response
-            setTimeout(() => {
-              if (isTabActivationInProgress) {
-                console.log("No response to keep-alive message, resetting flag");
-                isTabActivationInProgress = false;
-              }
-            }, 5000);
-          } catch (err) {
-            console.error("Error in keep-alive message:", err);
-            isTabActivationInProgress = false;
-          }
-        } else {
-          console.log("ChatGPT tab no longer exists");
-          isTabActivationInProgress = false;
-        }
-      } catch (error) {
-        console.error("Error during tab activation:", error);
-        isTabActivationInProgress = false;
-        
-        // Tab might not exist anymore
-        if (error.message.includes("No tab with id")) {
-          clearInterval(tabActivationInterval);
-          tabActivationInterval = null;
-          chatGPTTabId = null;
-        }
-      }
-    }
-  }, intervalMs);
-  
-  console.log(`Tab activation started with interval of ${intervalMinutes} minutes`);
-}
-
-function stopTabActivation() {
-  if (tabActivationInterval) {
-    clearInterval(tabActivationInterval);
-    tabActivationInterval = null;
-    console.log("Tab activation stopped");
-  }
-}
-
-function toggleTabActivation(enable, intervalMinutes) {
-  isTabActivationEnabled = enable;
-  
-  if (enable) {
-    startTabActivation(intervalMinutes);
-  } else {
-    stopTabActivation();
-  }
-  
-  // Save the setting
-  chrome.storage.local.set({ 
-    isTabActivationEnabled: enable,
-    tabActivationInterval: intervalMinutes
-  });
-  
-  return { success: true, enabled: enable };
-}
-
-// Initialize settings from storage
-chrome.storage.local.get(["isTabActivationEnabled", "tabActivationInterval"], (result) => {
-  if (result.isTabActivationEnabled) {
-    isTabActivationEnabled = result.isTabActivationEnabled;
-    if (isTabActivationEnabled) {
-      startTabActivation(result.tabActivationInterval || 5);
-    }
-  }
-}); 

@@ -34,18 +34,27 @@ const SELECTORS = {
     '[data-message-author-role="assistant"]:last-child .markdown',
     '[data-message-author-role="assistant"]:last-child',
     '.agent-turn:last-child',
-    'div[data-message-id] div[data-message-author-role="assistant"]:last-child'
+    'div[data-message-id] div[data-message-author-role="assistant"]:last-child',
+    // Specific selectors for existing conversations
+    'div.empty\\:hidden:last-child',
+    'div[data-message-author-role="assistant"]:not([data-message-id=""]):last-child'
   ],
   // Loading indicator
   loadingIndicator: [
     '.text-token-text-secondary .animate-spin',
-    '.result-streaming'
+    '.result-streaming',
+    '.result-thinking',
+    'div[data-state="thinking"]',
+    'svg.animate-spin',
+    'div[data-testid="thinking"]'
   ],
   // Copy button
   copyButton: [
     '[data-message-author-role="assistant"]:last-child button[aria-label="Copy message"]',
     '[data-message-author-role="assistant"]:last-child button[aria-label="Copy to clipboard"]',
-    'button[aria-label="Copy"]'
+    'button[aria-label="Copy"]',
+    '[data-message-author-role="assistant"]:last-child button:has(svg)',
+    'div[data-message-author-role="assistant"] button:has(svg)'
   ]
 };
 
@@ -92,7 +101,6 @@ function waitForElement(selectors, timeout = 30000) {
       }
       
       if (Date.now() - startTime >= timeout) {
-        // Log all attempted selectors for debugging
         if (Array.isArray(selectors)) {
           debug('Failed selectors:', selectors);
         }
@@ -100,31 +108,7 @@ function waitForElement(selectors, timeout = 30000) {
         return;
       }
       
-      setTimeout(checkElement, 300);
-    };
-    
-    checkElement();
-  });
-}
-
-// Waits for an element to disappear from the DOM
-function waitForElementToDisappear(selectors, timeout = 30000) {
-  return new Promise((resolve, reject) => {
-    const startTime = Date.now();
-    
-    const checkElement = () => {
-      const element = querySelector(selectors);
-      if (!element) {
-        resolve(true);
-        return;
-      }
-      
-      if (Date.now() - startTime >= timeout) {
-        reject(new Error(`Timeout waiting for element to disappear: ${Array.isArray(selectors) ? selectors.join(', ') : selectors}`));
-        return;
-      }
-      
-      setTimeout(checkElement, 300);
+      setTimeout(checkElement, 500);
     };
     
     checkElement();
@@ -178,6 +162,40 @@ async function setInputValue(inputElement, message) {
   }
 }
 
+// Simple function to get text from the latest assistant message
+function getLatestResponseText() {
+  debug('Getting latest response text');
+  
+  // Method 1: Try with the selector for completed responses
+  const responseElement = querySelector(SELECTORS.completedResponse);
+  if (responseElement) {
+    const text = responseElement.innerText || responseElement.textContent;
+    debug(`Got response from completed response element: ${text.length} chars`);
+    return text;
+  }
+  
+  // Method 2: Find the last assistant message
+  const assistantMessages = document.querySelectorAll('[data-message-author-role="assistant"]');
+  if (assistantMessages && assistantMessages.length > 0) {
+    const lastMessage = assistantMessages[assistantMessages.length - 1];
+    const text = lastMessage.innerText || lastMessage.textContent;
+    debug(`Got response from last assistant message: ${text.length} chars`);
+    return text;
+  }
+  
+  // Method 3: Look for markdown content
+  const markdownElements = document.querySelectorAll('.markdown');
+  if (markdownElements && markdownElements.length > 0) {
+    const lastMarkdown = markdownElements[markdownElements.length - 1];
+    const text = lastMarkdown.innerText || lastMarkdown.textContent;
+    debug(`Got response from last markdown element: ${text.length} chars`);
+    return text;
+  }
+  
+  debug('Could not find any response text');
+  return '';
+}
+
 // Sends a message to ChatGPT
 async function sendMessage(message) {
   try {
@@ -209,8 +227,9 @@ async function sendMessage(message) {
     sendButton.click();
     
     // Wait for response to complete
+    debug('Waiting for response to complete...');
     const response = await waitForResponseComplete();
-    debug('Response received');
+    debug(`Response received (${response.length} chars)`);
     
     return response;
   } catch (error) {
@@ -224,6 +243,8 @@ async function waitForResponseComplete(timeout = 120000) {
   return new Promise((resolve, reject) => {
     const startTime = Date.now();
     let lastDotCount = 0;
+    let lastResponseLength = 0;
+    let stableCount = 0;
     
     const checkCompletion = async () => {
       try {
@@ -250,52 +271,63 @@ async function waitForResponseComplete(timeout = 120000) {
         
         debug('No loading indicator, checking for response...');
         
-        // Look for the copy button which appears when response is complete
-        const copyButton = querySelector(SELECTORS.copyButton);
+        // Get current response text
+        const currentText = getLatestResponseText();
+        const currentLength = currentText.length;
         
-        if (copyButton) {
-          debug('Found copy button, response is complete');
-          
-          // Get all possible response elements
-          const responseElement = querySelector(SELECTORS.completedResponse);
-          
-          if (responseElement) {
-            // Try to click the copy button to get text to clipboard (as fallback)
-            try {
-              copyButton.click();
-              debug('Clicked copy button');
-            } catch (e) {
-              debug('Failed to click copy button', e);
-            }
-            
-            // Extract text content
-            let responseText = "";
-            
-            try {
-              responseText = responseElement.innerText || responseElement.textContent;
-              debug(`Got response (first 30 chars): "${responseText.substring(0, 30)}..."`);
-            } catch (e) {
-              debug('Error getting text content:', e);
-              responseText = "Error extracting response text";
-            }
-            
-            // Return the response
-            resolve(responseText);
-            return;
-          } else {
-            debug('Copy button found but no response element');
-          }
-        }
-        
-        // If no response found yet but no loading indicator, give it a moment and try again
-        if (Date.now() - startTime >= timeout) {
-          debug('Timeout waiting for response');
-          reject(new Error('Timeout waiting for ChatGPT response'));
+        // If text is still growing, keep waiting
+        if (currentLength > lastResponseLength) {
+          debug(`Response still growing: ${lastResponseLength} -> ${currentLength} chars`);
+          lastResponseLength = currentLength;
+          stableCount = 0;
+          setTimeout(checkCompletion, 1000);
           return;
         }
         
-        // Keep checking every 500ms
-        setTimeout(checkCompletion, 500);
+        // Text has stopped growing, check if it's stable
+        if (currentLength > 0) {
+          stableCount++;
+          debug(`Response stable for ${stableCount} checks (${currentLength} chars)`);
+          
+          // Consider the response complete after it's been stable for 3 checks
+          if (stableCount >= 3) {
+            debug('Response is complete and stable');
+            
+            // Try to click the copy button if available
+            const copyButton = querySelector(SELECTORS.copyButton);
+            if (copyButton) {
+              try {
+                debug('Found copy button, clicking it');
+                copyButton.scrollIntoView({ behavior: 'auto' });
+                await new Promise(resolve => setTimeout(resolve, 300));
+                copyButton.click();
+                debug('Clicked copy button');
+                await new Promise(resolve => setTimeout(resolve, 500));
+              } catch (e) {
+                debug('Error clicking copy button:', e);
+              }
+            }
+            
+            resolve(currentText);
+            return;
+          }
+        }
+        
+        // No response text found, check again shortly
+        if (Date.now() - startTime >= timeout) {
+          debug('Timeout waiting for response');
+          
+          // Return whatever text we have even if empty
+          const finalText = getLatestResponseText();
+          if (finalText.trim()) {
+            resolve(finalText);
+          } else {
+            reject(new Error('Timeout waiting for ChatGPT response'));
+          }
+          return;
+        }
+        
+        setTimeout(checkCompletion, 1000);
       } catch (error) {
         console.error('Error checking response completion:', error);
         if (Date.now() - startTime >= timeout) {
@@ -320,17 +352,23 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     (async () => {
       try {
         debug(`Processing message request: "${request.message.substring(0, 30)}..."`);
+        debug(`New conversation flag: ${request.newConversation}`);
         
         // Start new chat if requested
         if (request.newConversation) {
           await startNewChat();
+          debug('New chat started successfully');
+          // Wait a bit more for UI to settle after starting new chat
+          await new Promise(resolve => setTimeout(resolve, 2000));
+        } else {
+          debug('Continuing in existing conversation');
         }
         
         // Send the message and get response
         const response = await sendMessage(request.message);
         
         // Send back the response
-        debug('Sending response back to background script');
+        debug(`Sending response back to background script (length: ${response.length})`);
         sendResponse({ response });
       } catch (error) {
         console.error('Error in content script:', error);
@@ -348,14 +386,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   
   if (request.action === 'keepAlive') {
     debug('Received keepAlive message');
-    // This is just to keep the content script active
-    // Do a minimal operation to refresh the page state
-    const currentUrl = window.location.href;
-    sendResponse({ 
-      status: 'alive', 
-      url: currentUrl,
-      timestamp: new Date().toISOString()
-    });
+    sendResponse({ status: 'alive' });
     return true;
   }
 });
