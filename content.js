@@ -304,28 +304,108 @@ function getLatestResponseText() {
   }
 }
 
-// Sends a message to ChatGPT
-async function sendMessage(message) {
-  try {
-    debug(`Preparing to send message: "${message.substring(0, 30)}..."`);
+// CRITICAL FIX - Global variables to track the very last assistant response
+let lastAssistantResponse = '';
+let lastUserQuery = '';
+let isWaitingForResponse = false;
+
+// Create a MutationObserver to watch for new assistant messages
+const createResponseObserver = () => {
+  debug('Setting up DOM mutation observer for responses...');
+  
+  // Function to process mutations
+  const handleMutations = (mutations) => {
+    if (!isWaitingForResponse) return;
     
-    // COUNT ASSISTANT MESSAGES BEFORE SENDING
-    const beforeAssistantCount = document.querySelectorAll('div[data-message-author-role="assistant"]').length;
-    debug(`⭐ BEFORE: Found ${beforeAssistantCount} assistant messages before sending`);
-    
-    // Log the first 3 and last 3 assistant messages to debug
-    const beforeMessages = Array.from(document.querySelectorAll('div[data-message-author-role="assistant"]'));
-    if (beforeMessages.length > 0) {
-      const messagesToLog = Math.min(3, beforeMessages.length);
-      for (let i = 0; i < messagesToLog; i++) {
-        const msgText = beforeMessages[i].innerText.substring(0, 30);
-        debug(`👉 First message ${i+1}: "${msgText}..."`);
+    for (const mutation of mutations) {
+      // Look for added nodes
+      if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
+        // Check each added node
+        for (const node of mutation.addedNodes) {
+          if (node.nodeType === Node.ELEMENT_NODE) {
+            // Check if this is an assistant message or contains one
+            const assistantMessage = node.getAttribute && node.getAttribute('data-message-author-role') === 'assistant' 
+              ? node 
+              : node.querySelector && node.querySelector('[data-message-author-role="assistant"]');
+            
+            if (assistantMessage) {
+              debug('⭐ NEW ASSISTANT MESSAGE DETECTED THROUGH MUTATION OBSERVER!');
+              
+              // Extract the text content
+              const markdown = assistantMessage.querySelector('.markdown');
+              const content = markdown || assistantMessage;
+              const text = content.innerText || content.textContent;
+              
+              if (text && text.length > 0) {
+                lastAssistantResponse = text;
+                debug(`📝 Saved new response (${text.length} chars): "${text.substring(0, 30)}..."`);
+              }
+            }
+          }
+        }
       }
-      for (let i = Math.max(0, beforeMessages.length - 3); i < beforeMessages.length; i++) {
-        const msgText = beforeMessages[i].innerText.substring(0, 30);
-        debug(`👉 Last message ${i+1}: "${msgText}..."`);
+      
+      // Also check for text changes in existing assistant messages
+      if (mutation.type === 'characterData') {
+        const node = mutation.target;
+        if (node.parentElement) {
+          // Walk up to find assistant message
+          let current = node.parentElement;
+          let found = false;
+          
+          while (current && !found) {
+            if (current.getAttribute && current.getAttribute('data-message-author-role') === 'assistant') {
+              found = true;
+              
+              // Extract the text content
+              const text = current.innerText || current.textContent;
+              
+              if (text && text.length > 0 && text !== lastAssistantResponse) {
+                lastAssistantResponse = text;
+                debug(`📝 Updated response from text change (${text.length} chars): "${text.substring(0, 30)}..."`);
+              }
+            } else {
+              current = current.parentElement;
+            }
+          }
+        }
       }
     }
+  };
+  
+  // Create the observer
+  const observer = new MutationObserver(handleMutations);
+  
+  // Start observing the entire document for all changes
+  observer.observe(document.body, { 
+    childList: true, 
+    subtree: true, 
+    characterData: true,
+    characterDataOldValue: true
+  });
+  
+  debug('DOM mutation observer set up successfully');
+  return observer;
+};
+
+// Initialize the observer when the content script loads
+let responseObserver = createResponseObserver();
+
+// Completely override sendMessage function
+async function sendMessage(message) {
+  try {
+    debug(`💬 Sending message: "${message.substring(0, 30)}..."`);
+    
+    // Store the user query
+    lastUserQuery = message;
+    // Reset the last response
+    lastAssistantResponse = '';
+    // Set waiting flag
+    isWaitingForResponse = true;
+    
+    // Count assistant messages before
+    const beforeCount = document.querySelectorAll('[data-message-author-role="assistant"]').length;
+    debug(`Before sending: ${beforeCount} assistant messages`);
     
     // Find the textarea or input area
     const inputElement = await waitForElement(SELECTORS.chatInput);
@@ -333,14 +413,14 @@ async function sendMessage(message) {
       throw new Error('Cannot find input element');
     }
     
-    debug('Found input element:', inputElement);
+    debug('Found input element, setting value...');
     
     // Set the input value
     await setInputValue(inputElement, message);
     
     debug('Message inserted, looking for send button...');
     
-    // Wait a moment for the UI to update
+    // Wait for the UI to update
     await new Promise(resolve => setTimeout(resolve, 1000));
     
     // Find and click the send button
@@ -356,37 +436,34 @@ async function sendMessage(message) {
     debug('Waiting for response to complete...');
     await waitForResponseComplete();
     
-    // Now check the number of assistant messages AFTER sending
-    const afterAssistantCount = document.querySelectorAll('div[data-message-author-role="assistant"]').length;
-    debug(`⭐ AFTER: Found ${afterAssistantCount} assistant messages after sending`);
+    // Reset waiting flag
+    isWaitingForResponse = false;
     
-    // Also log the content of the new messages for debugging
-    const afterMessages = Array.from(document.querySelectorAll('div[data-message-author-role="assistant"]'));
+    // Count assistant messages after
+    const afterCount = document.querySelectorAll('[data-message-author-role="assistant"]').length;
+    debug(`After sending: ${afterCount} assistant messages (${afterCount - beforeCount} new)`);
     
-    if (afterMessages.length > beforeAssistantCount) {
-      debug(`👏 NEW MESSAGES DETECTED: ${afterMessages.length - beforeAssistantCount} new messages`);
-      // Log the new messages
-      for (let i = beforeAssistantCount; i < afterMessages.length; i++) {
-        const msgText = afterMessages[i].innerText.substring(0, 30);
-        debug(`✅ New message ${i+1}: "${msgText}..."`);
-      }
-    } else {
-      debug(`⚠️ NO NEW MESSAGES DETECTED. Messages before: ${beforeAssistantCount}, after: ${afterAssistantCount}`);
+    // Check if we have a stored response from our observer
+    if (lastAssistantResponse && lastAssistantResponse.length > 0) {
+      debug(`✅ Using response from mutation observer: "${lastAssistantResponse.substring(0, 30)}..."`);
+      return lastAssistantResponse;
     }
     
-    // Get the latest response
-    const latestResponse = getLatestResponseText();
-    debug(`💬 FINAL response: ${latestResponse.length} chars`);
-    debug(`First 30 chars: "${latestResponse.substring(0, 30)}..."`);
+    // Fallback to using getLatestResponseText
+    debug('⚠️ No response from mutation observer, falling back to getLatestResponseText');
+    const fallbackResponse = getLatestResponseText();
     
-    return latestResponse;
+    // Return the response (either from observer or from fallback)
+    return fallbackResponse;
   } catch (error) {
     console.error('Error sending message:', error);
+    // Reset waiting flag
+    isWaitingForResponse = false;
     throw error;
   }
 }
 
-// Waits for ChatGPT to complete its response - STEAM DECK FIX
+// Modify the waitForResponseComplete function
 async function waitForResponseComplete(timeout = 120000) {
   return new Promise((resolve, reject) => {
     const startTime = Date.now();
@@ -394,18 +471,16 @@ async function waitForResponseComplete(timeout = 120000) {
     let lastResponseLength = 0;
     let stableCount = 0;
     
-    // Simply count the initial messages
-    const initialMessageCount = document.querySelectorAll('div[data-message-author-role="assistant"]').length;
-    debug(`Initial message count: ${initialMessageCount}`);
-    
     const checkCompletion = async () => {
       try {
-        // First, check if there's a loading indicator
+        // First check if loading indicator is present
         const loadingIndicator = querySelector(SELECTORS.loadingIndicator);
         
         if (loadingIndicator) {
           debug('Loading indicator found, still waiting...');
+          
           if (Date.now() - startTime >= timeout) {
+            isWaitingForResponse = false;
             reject(new Error('Timeout waiting for ChatGPT response'));
             return;
           }
@@ -419,79 +494,55 @@ async function waitForResponseComplete(timeout = 120000) {
           return;
         }
         
-        debug('No loading indicator, checking response stability...');
+        debug('No loading indicator, checking if response is stable...');
         
-        // Get the latest text content
-        const currentText = getLatestResponseText();
-        const currentLength = currentText.length;
+        // Get the current response length (using our global var if available)
+        const currentResponse = lastAssistantResponse || getLatestResponseText();
+        const currentLength = currentResponse.length;
         
-        // If nothing found yet but we haven't timed out, keep checking
+        // If we have nothing yet, but we're still within timeout
         if (currentLength === 0) {
           if (Date.now() - startTime >= timeout) {
-            debug('Timeout waiting for any response');
-            reject(new Error('Timeout waiting for ChatGPT response - no content found'));
+            isWaitingForResponse = false;
+            reject(new Error('No response received'));
             return;
           }
-          debug('No content found yet, continuing to check...');
+          
           setTimeout(checkCompletion, 500);
           return;
         }
         
-        // If text is still growing, keep waiting
+        // If the response is still changing
         if (currentLength !== lastResponseLength) {
-          if (currentLength > lastResponseLength) {
-            debug(`Response still growing: ${lastResponseLength} → ${currentLength} chars`);
-          } else {
-            debug(`Response length changed: ${lastResponseLength} → ${currentLength} chars`);
-          }
+          debug(`Response changed: ${lastResponseLength} → ${currentLength} chars`);
           lastResponseLength = currentLength;
           stableCount = 0;
           setTimeout(checkCompletion, 500);
           return;
         }
         
-        // Text has stopped growing, check if it's stable
+        // Response has not changed, increment stable count
         stableCount++;
         debug(`Response stable for ${stableCount} checks (${currentLength} chars)`);
         
-        // Consider the response complete after it's been stable for several checks
-        if (stableCount >= 5) {  // Increased from 3 to 5 for more stability
-          debug('Response is complete and stable');
-          
-          // Try to click the copy button if available
-          try {
-            const copyButton = querySelector(SELECTORS.copyButton);
-            if (copyButton) {
-              debug('Found copy button, clicking it');
-              copyButton.scrollIntoView({ behavior: 'auto' });
-              await new Promise(resolve => setTimeout(resolve, 300));
-              copyButton.click();
-              debug('Clicked copy button');
-              await new Promise(resolve => setTimeout(resolve, 500));
-            } else {
-              debug('No copy button found');
-            }
-          } catch (e) {
-            debug('Error handling copy button:', e);
-          }
-          
-          debug(`Final response length: ${currentText.length} chars`);
-          debug(`Response first 30 chars: "${currentText.substring(0, 30)}..."`);
-          
-          resolve(currentText);
+        // Consider it complete after several stable checks
+        if (stableCount >= 5) {
+          debug(`Response complete! Final length: ${currentLength} chars`);
+          debug(`First 50 chars: "${currentResponse.substring(0, 50)}..."`);
+          resolve(currentResponse);
           return;
         }
         
-        // Continue checking for stability
+        // Keep checking
         setTimeout(checkCompletion, 500);
       } catch (error) {
-        console.error('Error checking response completion:', error);
-        debug(`Error in checkCompletion: ${error.message}`);
+        console.error('Error checking completion:', error);
+        debug(`Error: ${error.message}`);
         
         if (Date.now() - startTime >= timeout) {
+          isWaitingForResponse = false;
           reject(error);
         } else {
-          // Try again after a delay
           setTimeout(checkCompletion, 1000);
         }
       }
@@ -502,61 +553,62 @@ async function waitForResponseComplete(timeout = 120000) {
   });
 }
 
-// Listen for messages from the background script
+// Completely override the onMessage listener
+chrome.runtime.onMessage.removeListener(() => {}); // Remove any existing listeners
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   debug('Content script received message:', request);
   
   if (request.action === 'sendMessage') {
     (async () => {
       try {
-        debug(`Processing message request: "${request.message.substring(0, 30)}..."`);
+        debug(`📩 Processing message request: "${request.message.substring(0, 30)}..."`);
         debug(`New conversation flag: ${request.newConversation}`);
         
-        // Log the current state of the conversation for debugging
-        const beforeAssistantMessages = document.querySelectorAll('div[data-message-author-role="assistant"]');
-        debug(`⭐ Before processing: ${beforeAssistantMessages.length} assistant messages`);
+        // Reset tracked response
+        lastAssistantResponse = '';
         
         // Start new chat if requested
         if (request.newConversation) {
-          debug('Starting new chat as requested');
-          await startNewChat();
-          debug('New chat started successfully');
-          // Wait longer for UI to settle after starting new chat
-          await new Promise(resolve => setTimeout(resolve, 3000));
+          try {
+            debug('Starting new chat...');
+            await startNewChat();
+            debug('New chat started successfully');
+            // Wait for the UI to fully update
+            await new Promise(resolve => setTimeout(resolve, 3000));
+          } catch (e) {
+            debug(`Error starting new chat: ${e.message}`);
+            // Continue anyway
+          }
         } else {
           debug('Continuing in existing conversation');
-          // For existing conversations, log the current state
-          if (beforeAssistantMessages.length > 0) {
-            // Get text from the last assistant message for debugging
-            const lastMessage = beforeAssistantMessages[beforeAssistantMessages.length - 1];
-            const lastText = lastMessage.innerText || lastMessage.textContent;
-            debug(`Last message in existing conversation: "${lastText.substring(0, 30)}..."`);
+          
+          // Log the current state for debugging
+          const assistantMessages = document.querySelectorAll('[data-message-author-role="assistant"]');
+          debug(`Current conversation has ${assistantMessages.length} assistant messages`);
+          
+          if (assistantMessages.length > 0) {
+            const lastMsg = assistantMessages[assistantMessages.length - 1];
+            const text = lastMsg.innerText || lastMsg.textContent;
+            debug(`Last message in conversation: "${text.substring(0, 30)}..."`);
           }
-          // Wait for UI to be ready
-          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+        
+        // Make sure our observer is active
+        if (!responseObserver) {
+          responseObserver = createResponseObserver();
         }
         
         // Send the message and get response
-        debug('Sending message to ChatGPT...');
         const response = await sendMessage(request.message);
-        debug(`Got response: "${response.substring(0, 30)}..."`);
         
-        // STEAM DECK SPECIFIC: Force one more check of the latest response
-        // Wait a moment for any final DOM updates
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        // Wait a moment for any final updates
+        await new Promise(resolve => setTimeout(resolve, 2000));
         
-        // Get the absolute latest response directly one more time
-        const finalResponse = getLatestResponseText();
+        // Get the final response - prioritize our tracked response
+        const finalResponse = lastAssistantResponse || response;
         
-        // If the final response is different and not empty, use it instead
-        if (finalResponse !== response && finalResponse.length > 0) {
-          debug(`Using updated response from final check: "${finalResponse.substring(0, 30)}..."`);
-          sendResponse({ response: finalResponse });
-        } else {
-          // Send back the original response
-          debug(`Using original response: "${response.substring(0, 30)}..."`);
-          sendResponse({ response });
-        }
+        debug(`🎯 FINAL RESPONSE (${finalResponse.length} chars): "${finalResponse.substring(0, 30)}..."`);
+        sendResponse({ response: finalResponse });
       } catch (error) {
         console.error('Error in content script:', error);
         sendResponse({ error: error.message || 'Unknown error in content script' });
@@ -577,6 +629,26 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 });
+
+// Immediately look for any existing assistant messages and log them
+(() => {
+  const assistantMessages = document.querySelectorAll('[data-message-author-role="assistant"]');
+  debug(`Found ${assistantMessages.length} assistant messages on page load`);
+  
+  if (assistantMessages.length > 0) {
+    debug('Listing messages:');
+    assistantMessages.forEach((msg, i) => {
+      const text = msg.innerText || msg.textContent;
+      debug(`Message ${i+1}: "${text.substring(0, 30)}..."`);
+    });
+    
+    // Store the last message
+    const lastMsg = assistantMessages[assistantMessages.length - 1];
+    const text = lastMsg.innerText || lastMsg.textContent;
+    lastAssistantResponse = text;
+    debug(`Initial lastAssistantResponse set to: "${text.substring(0, 30)}..."`);
+  }
+})();
 
 // Document load state
 debug('OpenAPI content script loaded successfully!');
