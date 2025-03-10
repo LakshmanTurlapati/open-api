@@ -1,5 +1,7 @@
 
-![Icon](https://github.com/LakshmanTurlapati/open-api/blob/main/Extend%20API/icons/icon128.png?raw=true)
+![Icon](https://github.com/LakshmanTurlapati/open-api/blob/main/icons/icon128.png?raw=true)
+
+
 
 # **OpenAPI Documentation** – *Unleash the Power of ChatGPT*
 
